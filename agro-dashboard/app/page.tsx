@@ -13,6 +13,8 @@ import {
   ResponsiveContainer,
   Area
 } from 'recharts';
+import ChartMatopiba from './components/ChartMatopiba';
+import ChartCreditoVBP from './components/ChartCreditoVBP';
 
 // Interface atualizada com a nova métrica
 interface AgroData {
@@ -55,6 +57,27 @@ export default function Dashboard() {
       });
   }, []);
 
+  // Adicione este novo estado logo abaixo dos que já existem
+  const [dataMatopiba, setDataMatopiba] = useState([]);
+  const [dataCredito, setDataCredito] = useState([]);
+
+  // Dentro do useEffect atual (ou num novo), adicione a chamada:
+  useEffect(() => {
+    // ... sua chamada antiga do macro cenário ...
+
+    // Nova chamada Regional
+    fetch('http://localhost:8000/api/v1/indicadores/matopiba')
+      .then((res) => res.json())
+      .then((json) => setDataMatopiba(json.data || []))
+      .catch((err) => console.error("Erro MATOPIBA:", err));
+
+    // Nova chamada Crédito vs VBP
+    fetch('http://localhost:8000/api/v1/indicadores/credito-vbp')
+      .then((res) => res.json())
+      .then((json) => setDataCredito(json.data || []))
+      .catch((err) => console.error("Erro Crédito:", err));
+  }, []);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
@@ -78,33 +101,30 @@ export default function Dashboard() {
           <div className="mb-6 flex flex-wrap gap-4">
             <button
               onClick={() => toggleMetric('producao')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${
-                activeMetrics.producao
-                  ? 'bg-emerald-500 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-              }`}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.producao
+                ? 'bg-emerald-500 text-white shadow-md'
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                }`}
             >
               <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-300"></span>
               Produção (Ton)
             </button>
             <button
               onClick={() => toggleMetric('fogo')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${
-                activeMetrics.fogo
-                  ? 'bg-red-500 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-              }`}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.fogo
+                ? 'bg-red-500 text-white shadow-md'
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                }`}
             >
               <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-300"></span>
               Focos de Calor
             </button>
             <button
               onClick={() => toggleMetric('dolar')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${
-                activeMetrics.dolar
-                  ? 'bg-blue-500 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-              }`}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.dolar
+                ? 'bg-blue-500 text-white shadow-md'
+                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                }`}
             >
               <span className="mr-2 inline-block h-3 w-3 rounded-full bg-blue-300"></span>
               Dólar (R$)
@@ -195,6 +215,25 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
+
+      {/* Nova Seção: Visão Regional MATOPIBA */}
+      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Visão Regional: O Fenômeno MATOPIBA</h2>
+        <p className="text-gray-600 mb-4">
+          Evolução do Valor Bruto da Produção (VBP) de soja em grãos na maior fronteira agrícola do país.
+        </p>
+
+        <ChartMatopiba data={dataMatopiba} />
+      </div>
+
+      {/* Nova Seção: Crédito x Produção */}
+      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Alavancagem: Crédito Rural vs VBP</h2>
+        <p className="text-gray-600 mb-4">
+          Relação histórica entre as concessões de crédito e o Valor Bruto de Produção no MATOPIBA.
+        </p>
+        <ChartCreditoVBP data={dataCredito} />
       </div>
     </div>
   );

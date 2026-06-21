@@ -63,3 +63,33 @@ def get_indicadores_anuais():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao consultar o Data Lake: {str(e)}")
+
+
+@app.get("/api/v1/indicadores/matopiba")
+def get_indicadores_matopiba():
+    try:
+        con = get_duckdb_connection()
+        query = """
+            SELECT * FROM read_parquet('s3://gold/matopiba_consolidado_*.parquet') 
+            ORDER BY ano ASC
+        """
+        resultado = con.execute(query).df()
+        resultado = resultado.where(resultado.notnull(), None)
+        return {"data": resultado.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
+
+
+@app.get("/api/v1/indicadores/credito-vbp")
+def get_indicadores_credito_vbp():
+    try:
+        con = get_duckdb_connection()
+        query = """
+            SELECT * FROM read_parquet('s3://gold/credito_vbp_consolidado_*.parquet') 
+            ORDER BY ano ASC
+        """
+        resultado = con.execute(query).df()
+        resultado = resultado.where(resultado.notnull(), None)
+        return {"data": resultado.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
