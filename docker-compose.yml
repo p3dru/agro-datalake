@@ -1,0 +1,68 @@
+services:
+  # MinIO (Object Storage / Simulador de S3)
+  minio:
+    image: minio/minio:latest
+    container_name: lakehouse-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  # PostgreSQL (Base de dados obrigatória para o Kestra em standalone)
+  postgres:
+    image: postgres:15
+    container_name: lakehouse-postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: kestra
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: password123
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kestra (Orquestrador de Dados)
+  kestra:
+    image: kestra/kestra:latest-full
+    container_name: lakehouse-kestra
+    user: "root" # Necessário para interagir com o docker.sock
+    command: server standalone
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/kestra-wd:/tmp/kestra-wd
+      - kestra_data:/app/storage
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/kestra
+            driverClassName: org.postgresql.Driver
+            username: kestra
+            password: password123
+        kestra:
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: "/app/storage"
+          queue:
+            type: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  minio_data:
+  postgres_data:
+  kestra_data:
