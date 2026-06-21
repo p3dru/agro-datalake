@@ -23,7 +23,7 @@ export default function ChartMatopiba({ data }: { data: MatopibaRow[] }) {
   // Transforma os dados brutos em um formato amigável para o Recharts
   // Ex: { ano: 2020, 'Piauí': 1000000, 'Bahia': 5000000, ... }
   const chartData = useMemo(() => {
-    const grouped: Record<number, any> = {};
+    const grouped: any = {};
     
     data.forEach((item) => {
       if (!grouped[item.ano]) {
@@ -34,9 +34,9 @@ export default function ChartMatopiba({ data }: { data: MatopibaRow[] }) {
     });
 
     // Converte de volta para array e ordena cronologicamente, filtrando os zerados antigos
-    return Object.values(grouped)
-      .filter((row) => row.ano >= 1995) 
-      .sort((a, b) => a.ano - b.ano);
+    return (Object.values(grouped) as any[])
+      .filter((row: any) => row.ano >= 1995) 
+      .sort((a: any, b: any) => a.ano - b.ano);
   }, [data]);
 
   // Formatador visual para converter números gigantes em Bilhões/Milhões
@@ -61,8 +61,8 @@ export default function ChartMatopiba({ data }: { data: MatopibaRow[] }) {
           />
           
           <Tooltip 
-            formatter={(value: number, name: string) => [
-              `R$ ${value.toLocaleString('pt-BR')}`, 
+            formatter={(value: any, name: any) => [
+              `R$ ${Number(value).toLocaleString('pt-BR')}`, 
               name
             ]}
             labelFormatter={(label) => `Ano: ${label}`}

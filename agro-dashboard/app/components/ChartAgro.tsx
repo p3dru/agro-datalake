@@ -53,7 +53,7 @@ export default function ChartAgro({ data }: { data: AgroData[] }) {
                     />
 
                     <Tooltip
-                        formatter={(value: number, name: string) => {
+                        formatter={(value: any, name: any) => {
                             if (name === "cotacao_media_dolar") {
                                 return [`R$ ${Number(value).toFixed(2)}`, "Dólar Comercial (Média Anual)"];
                             }

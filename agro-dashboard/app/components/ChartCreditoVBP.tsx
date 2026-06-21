@@ -47,7 +47,7 @@ export default function ChartCreditoVBP({ data }: { data: CreditoVBPRow[] }) {
                     />
 
                     <Tooltip
-                        formatter={(value: number) => `R$ ${Number(value).toLocaleString('pt-BR')} Milhões`}
+                        formatter={(value: any) => `R$ ${Number(value).toLocaleString('pt-BR')} Milhões`}
                         labelFormatter={(label) => `Ano: ${label}`}
                     />
                     <Legend />

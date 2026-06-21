@@ -9,7 +9,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Area
 } from 'recharts';
@@ -60,6 +59,19 @@ export default function Dashboard() {
   // Adicione este novo estado logo abaixo dos que já existem
   const [dataMatopiba, setDataMatopiba] = useState([]);
   const [dataCredito, setDataCredito] = useState([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      await fetch('http://localhost:8000/api/v1/sync', { method: 'POST' });
+      // Mantém o botão em estado de "Sincronizando..." por uns segundos para debouncing visual
+      setTimeout(() => setIsSyncing(false), 3000);
+    } catch (err) {
+      console.error("Erro ao sincronizar:", err);
+      setIsSyncing(false);
+    }
+  };
 
   // Dentro do useEffect atual (ou num novo), adicione a chamada:
   useEffect(() => {
@@ -89,12 +101,36 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="mx-auto max-w-6xl">
-        <h1 className="mb-2 text-3xl font-bold text-gray-800">
-          Inteligência Agrícola: Soja, Câmbio e Clima
-        </h1>
-        <p className="mb-8 text-gray-600">
-          Cruzamento de dados de produção (IBGE), economia (IPEA) e riscos ambientais (INPE).
-        </p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="mb-2 text-3xl font-bold text-gray-800">
+              Inteligência Agrícola: Soja, Câmbio e Clima
+            </h1>
+            <p className="text-gray-600">
+              Cruzamento de dados de produção (IBGE), economia (IPEA) e riscos ambientais (INPE).
+            </p>
+          </div>
+          
+          <button
+            onClick={handleSync}
+            disabled={isSyncing}
+            className={`flex items-center rounded-lg px-6 py-3 font-semibold text-white transition-all shadow-md ${
+              isSyncing ? 'bg-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'
+            }`}
+          >
+            {isSyncing ? (
+              <>
+                <svg className="mr-2 h-5 w-5 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                Sincronizando Lakehouse...
+              </>
+            ) : (
+              <>
+                <svg className="mr-2 h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                Sincronizar (Webhook)
+              </>
+            )}
+          </button>
+        </div>
 
         <div className="rounded-xl bg-white p-6 shadow-lg">
           {/* Controles de Filtro */}
@@ -167,11 +203,12 @@ export default function Dashboard() {
                 <YAxis yAxisId="fire" hide={true} domain={['auto', 'auto']} />
 
                 <Tooltip
-                  formatter={(value: number, name: string) => {
-                    if (name === "Produção (Ton)") return [value.toLocaleString('pt-BR'), name];
-                    if (name === "Dólar (R$)") return [`R$ ${value.toFixed(2)}`, name];
-                    if (name === "Focos de Calor") return [value.toLocaleString('pt-BR'), name];
-                    return value;
+                  formatter={(value: any, name: any) => {
+                    const numValue = Number(value);
+                    if (name === "Produção (Ton)") return [numValue.toLocaleString('pt-BR'), name];
+                    if (name === "Dólar (R$)") return [`R$ ${numValue.toFixed(2)}`, name];
+                    if (name === "Focos de Calor") return [numValue.toLocaleString('pt-BR'), name];
+                    return numValue;
                   }}
                 />
 
