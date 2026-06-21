@@ -25,8 +25,8 @@ export default function ChartAgro({ data }: { data: AgroData[] }) {
         .reverse();
 
     return (
-        <div className="h-96 w-full mt-8">
-            <ResponsiveContainer width="100%" height="100%">
+        <div className="h-96 w-full mt-8" style={{ minHeight: '384px' }}>
+            <ResponsiveContainer width="100%" height="100%" minHeight={384}>
                 <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
 

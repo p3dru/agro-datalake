@@ -1,11 +1,19 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import duckdb
 
 # Inicializa a aplicação FastAPI
 app = FastAPI(
     title="Agro Lakehouse API",
     description="API analítica para consulta de indicadores agropecuários",
-    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 def get_duckdb_connection():
@@ -39,7 +47,7 @@ def get_indicadores_anuais():
         
         # Apontando especificamente para o novo arquivo consolidado
         query = """
-            SELECT * FROM read_parquet('s3://gold/soja_vs_dolar_*.parquet') 
+            SELECT * FROM read_parquet('s3://gold/agro_clima_economia_*.parquet')
             ORDER BY ano DESC
         """
         

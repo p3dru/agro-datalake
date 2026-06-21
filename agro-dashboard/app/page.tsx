@@ -1,77 +1,201 @@
-import ChartAgro from "./components/ChartAgro";
-import { TrendingUp, Database, Activity } from "lucide-react";
+"use client";
 
-// Função para buscar os dados da nossa API (roda no servidor do Next.js)
-async function getIndicadores() {
-  // Apontando para o FastAPI rodando localmente
-  const res = await fetch("http://127.0.0.1:8000/api/v1/indicadores/anuais", {
-    cache: "no-store", // Garante que pegamos dados frescos se o Lakehouse atualizar
-  });
+import React, { useEffect, useState } from 'react';
+import {
+  ComposedChart,
+  Line,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Area
+} from 'recharts';
 
-  if (!res.ok) {
-    throw new Error("Falha ao carregar os dados da camada Gold");
-  }
-
-  return res.json();
+// Interface atualizada com a nova métrica
+interface AgroData {
+  ano: number;
+  total_area_hectares: number;
+  total_producao_toneladas: number;
+  cotacao_media_dolar: number;
+  total_focos_calor: number;
 }
 
-export default async function Home() {
-  const payload = await getIndicadores();
-  const dados = payload.data;
-  const totalLinhas = payload.total_linhas;
+export default function Dashboard() {
+  const [data, setData] = useState<AgroData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeMetrics, setActiveMetrics] = useState({
+    producao: true,
+    dolar: true,
+    fogo: true,
+  });
 
-  // Pegar o dado mais recente para os "Cards" de resumo
-  const dadoMaisRecente = dados[0];
+  const toggleMetric = (metric: keyof typeof activeMetrics) => {
+    setActiveMetrics((prev) => ({
+      ...prev,
+      [metric]: !prev[metric],
+    }));
+  };
+
+  useEffect(() => {
+    // Apontando para a sua API FastAPI
+    fetch('http://localhost:8000/api/v1/indicadores/anuais')
+      .then((response) => response.json())
+      .then((jsonData) => {
+        // Inverte os dados para o gráfico ir do ano mais antigo ao mais recente
+        const records = jsonData.data || jsonData;
+        setData([...records].reverse());
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error("Erro ao buscar dados da API:", error);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <p className="text-xl font-semibold text-gray-600">Carregando Data Lakehouse...</p>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="mx-auto max-w-6xl">
+        <h1 className="mb-2 text-3xl font-bold text-gray-800">
+          Inteligência Agrícola: Soja, Câmbio e Clima
+        </h1>
+        <p className="mb-8 text-gray-600">
+          Cruzamento de dados de produção (IBGE), economia (IPEA) e riscos ambientais (INPE).
+        </p>
 
-        {/* Cabeçalho */}
-        <header className="mb-10">
-          <h1 className="text-3xl font-bold">Observatório Agropecuário</h1>
-          <p className="text-gray-500">Inteligência de dados baseada em Data Lakehouse (Arquitetura Medalhão)</p>
-        </header>
+        <div className="rounded-xl bg-white p-6 shadow-lg">
+          {/* Controles de Filtro */}
+          <div className="mb-6 flex flex-wrap gap-4">
+            <button
+              onClick={() => toggleMetric('producao')}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${
+                activeMetrics.producao
+                  ? 'bg-emerald-500 text-white shadow-md'
+                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+              }`}
+            >
+              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-300"></span>
+              Produção (Ton)
+            </button>
+            <button
+              onClick={() => toggleMetric('fogo')}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${
+                activeMetrics.fogo
+                  ? 'bg-red-500 text-white shadow-md'
+                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+              }`}
+            >
+              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-300"></span>
+              Focos de Calor
+            </button>
+            <button
+              onClick={() => toggleMetric('dolar')}
+              className={`rounded-lg px-4 py-2 font-medium transition-all ${
+                activeMetrics.dolar
+                  ? 'bg-blue-500 text-white shadow-md'
+                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+              }`}
+            >
+              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-blue-300"></span>
+              Dólar (R$)
+            </button>
+          </div>
 
-        {/* Cards de KPI */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
-            <div className="p-3 bg-blue-100 text-blue-600 rounded-lg"><Database /></div>
-            <div>
-              <p className="text-sm text-gray-500">Registros Históricos (Gold)</p>
-              <p className="text-2xl font-bold">{totalLinhas} anos</p>
-            </div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
-            <div className="p-3 bg-purple-100 text-purple-600 rounded-lg"><Activity /></div>
-            <div>
-              <p className="text-sm text-gray-500">Status do Pipeline</p>
-              <p className="text-2xl font-bold text-green-500">Ativo</p>
-            </div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center space-x-4">
-            <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg"><TrendingUp /></div>
-            <div>
-              <p className="text-sm text-gray-500">Dólar Médio ({dadoMaisRecente.ano})</p>
-              <p className="text-2xl font-bold">
-                R$ {dadoMaisRecente.cotacao_media_dolar
-                  ? dadoMaisRecente.cotacao_media_dolar.toFixed(2)
-                  : "N/A"}
-              </p>
-            </div>
+          <div className="h-[500px] w-full" style={{ minHeight: '500px' }}>
+            <ResponsiveContainer width="100%" height="100%" minHeight={500}>
+              <ComposedChart
+                data={data}
+                margin={{ top: 20, right: 40, bottom: 20, left: 60 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis dataKey="ano" />
+
+                {/* Eixo Y Dinâmico da Esquerda */}
+                <YAxis
+                  yAxisId="left"
+                  domain={['auto', 'auto']}
+                  tickFormatter={(value) => {
+                    if (activeMetrics.producao) return `${(value / 1000000).toFixed(1)}M`;
+                    if (activeMetrics.dolar) return `R$ ${value}`;
+                    return value.toLocaleString('pt-BR');
+                  }}
+                  width={80}
+                />
+
+                {/* Eixo Y da Direita exclusivo para Dólar */}
+                {activeMetrics.producao && activeMetrics.dolar && (
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={['auto', 'auto']}
+                    tickFormatter={(value) => `R$ ${value}`}
+                    width={80}
+                  />
+                )}
+
+                {/* Eixo Invisível para Focos */}
+                <YAxis yAxisId="fire" hide={true} domain={['auto', 'auto']} />
+
+                <Tooltip
+                  formatter={(value: number, name: string) => {
+                    if (name === "Produção (Ton)") return [value.toLocaleString('pt-BR'), name];
+                    if (name === "Dólar (R$)") return [`R$ ${value.toFixed(2)}`, name];
+                    if (name === "Focos de Calor") return [value.toLocaleString('pt-BR'), name];
+                    return value;
+                  }}
+                />
+
+                {/* Produção da Soja (Barras Verdes) */}
+                {activeMetrics.producao && (
+                  <Bar
+                    yAxisId="left"
+                    dataKey="total_producao_toneladas"
+                    name="Produção (Ton)"
+                    fill="#10b981"
+                    radius={[4, 4, 0, 0]}
+                  />
+                )}
+
+                {/* Focos de Calor (Área Vermelha ao fundo) */}
+                {activeMetrics.fogo && (
+                  <Area
+                    yAxisId={(!activeMetrics.producao && !activeMetrics.dolar) ? "left" : "fire"}
+                    type="monotone"
+                    dataKey="total_focos_calor"
+                    name="Focos de Calor"
+                    fill="#ef4444"
+                    stroke="#ef4444"
+                    fillOpacity={0.2}
+                  />
+                )}
+
+                {/* Cotação do Dólar (Linha Azul) */}
+                {activeMetrics.dolar && (
+                  <Line
+                    yAxisId={activeMetrics.producao ? "right" : "left"}
+                    type="monotone"
+                    dataKey="cotacao_media_dolar"
+                    name="Dólar (R$)"
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    dot={{ r: 4 }}
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
         </div>
-
-        {/* Gráfico */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <h2 className="text-xl font-semibold mb-2">Produção de Soja em Grãos vs. Cotação do Dólar</h2>
-          <p className="text-sm text-gray-500">
-            Correlação histórica entre o volume de grãos produzidos (em Kg) e a valorização da moeda americana.
-          </p>
-          <ChartAgro data={dados} />
-        </div>
-
       </div>
-    </main>
+    </div>
   );
 }
