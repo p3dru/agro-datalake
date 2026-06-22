@@ -14,6 +14,8 @@ import {
 } from 'recharts';
 import ChartMatopiba from './components/ChartMatopiba';
 import ChartCreditoVBP from './components/ChartCreditoVBP';
+import ChartClima from './components/ChartClima';
+import ChartMercado from './components/ChartMercado';
 
 // Interface atualizada com a nova métrica
 interface AgroData {
@@ -56,9 +58,10 @@ export default function Dashboard() {
       });
   }, []);
 
-  // Adicione este novo estado logo abaixo dos que já existem
   const [dataMatopiba, setDataMatopiba] = useState([]);
   const [dataCredito, setDataCredito] = useState([]);
+  const [dataClima, setDataClima] = useState([]);
+  const [dataMercado, setDataMercado] = useState([]);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSync = async () => {
@@ -88,6 +91,18 @@ export default function Dashboard() {
       .then((res) => res.json())
       .then((json) => setDataCredito(json.data || []))
       .catch((err) => console.error("Erro Crédito:", err));
+
+    // Nova chamada Clima INMET
+    fetch('http://localhost:8000/api/v1/indicadores/clima')
+      .then((res) => res.json())
+      .then((json) => setDataClima(json.data || []))
+      .catch((err) => console.error("Erro Clima:", err));
+
+    // Nova chamada Mercado CONAB/B3
+    fetch('http://localhost:8000/api/v1/indicadores/mercado')
+      .then((res) => res.json())
+      .then((json) => setDataMercado(json.data || []))
+      .catch((err) => console.error("Erro Mercado:", err));
   }, []);
 
   if (loading) {
@@ -271,6 +286,24 @@ export default function Dashboard() {
           Relação histórica entre as concessões de crédito e o Valor Bruto de Produção no MATOPIBA.
         </p>
         <ChartCreditoVBP data={dataCredito} />
+      </div>
+
+      {/* Nova Seção: Impactos Climáticos */}
+      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Monitoramento Climático INMET</h2>
+        <p className="text-gray-600 mb-4">
+          Precipitação e temperatura média na região do MATOPIBA.
+        </p>
+        <ChartClima data={dataClima} />
+      </div>
+
+      {/* Nova Seção: Mercado e Expectativas */}
+      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Mercado Futuro vs Safra</h2>
+        <p className="text-gray-600 mb-4">
+          Estimativa de Safra da CONAB em relação aos contratos futuros de Soja na B3/CBOT.
+        </p>
+        <ChartMercado data={dataMercado} />
       </div>
     </div>
   );
