@@ -25,7 +25,7 @@ tasks:
       print("Iniciando extração do Mercado Financeiro (yfinance)...")
       
       soja = yf.Ticker("ZS=F")
-      hist = soja.history(period="1y")
+      hist = soja.history(period="10y")
       
       df_b3 = hist.reset_index()[['Date', 'Close']].copy()
       df_b3.rename(columns={"Date": "data_pregao", "Close": "preco_fechamento_usd"}, inplace=True)

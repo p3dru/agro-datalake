@@ -1,74 +1,25 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import {
-  ComposedChart,
-  Line,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Area
-} from 'recharts';
+import ChartMaster from './components/ChartMaster';
 import ChartMatopiba from './components/ChartMatopiba';
 import ChartCreditoVBP from './components/ChartCreditoVBP';
 import ChartClima from './components/ChartClima';
 import ChartMercado from './components/ChartMercado';
 
-// Interface atualizada com a nova métrica
-interface AgroData {
-  ano: number;
-  total_area_hectares: number;
-  total_producao_toneladas: number;
-  cotacao_media_dolar: number;
-  total_focos_calor: number;
-}
-
 export default function Dashboard() {
-  const [data, setData] = useState<AgroData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeMetrics, setActiveMetrics] = useState({
-    producao: true,
-    dolar: true,
-    fogo: true,
-  });
-
-  const toggleMetric = (metric: keyof typeof activeMetrics) => {
-    setActiveMetrics((prev) => ({
-      ...prev,
-      [metric]: !prev[metric],
-    }));
-  };
-
-  useEffect(() => {
-    // Apontando para a sua API FastAPI
-    fetch('http://localhost:8000/api/v1/indicadores/anuais')
-      .then((response) => response.json())
-      .then((jsonData) => {
-        // Inverte os dados para o gráfico ir do ano mais antigo ao mais recente
-        const records = jsonData.data || jsonData;
-        setData([...records].reverse());
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Erro ao buscar dados da API:", error);
-        setLoading(false);
-      });
-  }, []);
+  const [activeTab, setActiveTab] = useState('master');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [dataMatopiba, setDataMatopiba] = useState([]);
   const [dataCredito, setDataCredito] = useState([]);
   const [dataClima, setDataClima] = useState([]);
   const [dataMercado, setDataMercado] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSync = async () => {
     setIsSyncing(true);
     try {
       await fetch('http://localhost:8000/api/v1/sync', { method: 'POST' });
-      // Mantém o botão em estado de "Sincronizando..." por uns segundos para debouncing visual
       setTimeout(() => setIsSyncing(false), 3000);
     } catch (err) {
       console.error("Erro ao sincronizar:", err);
@@ -76,234 +27,112 @@ export default function Dashboard() {
     }
   };
 
-  // Dentro do useEffect atual (ou num novo), adicione a chamada:
   useEffect(() => {
-    // ... sua chamada antiga do macro cenário ...
-
-    // Nova chamada Regional
     fetch('http://localhost:8000/api/v1/indicadores/matopiba')
       .then((res) => res.json())
       .then((json) => setDataMatopiba(json.data || []))
       .catch((err) => console.error("Erro MATOPIBA:", err));
 
-    // Nova chamada Crédito vs VBP
     fetch('http://localhost:8000/api/v1/indicadores/credito-vbp')
       .then((res) => res.json())
       .then((json) => setDataCredito(json.data || []))
       .catch((err) => console.error("Erro Crédito:", err));
 
-    // Nova chamada Clima INMET
     fetch('http://localhost:8000/api/v1/indicadores/clima')
       .then((res) => res.json())
       .then((json) => setDataClima(json.data || []))
       .catch((err) => console.error("Erro Clima:", err));
 
-    // Nova chamada Mercado CONAB/B3
     fetch('http://localhost:8000/api/v1/indicadores/mercado')
       .then((res) => res.json())
       .then((json) => setDataMercado(json.data || []))
       .catch((err) => console.error("Erro Mercado:", err));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <p className="text-xl font-semibold text-gray-600">Carregando Data Lakehouse...</p>
-      </div>
-    );
-  }
+  const tabs = [
+    { id: 'master', label: 'Motor de Correlação' },
+    { id: 'matopiba', label: 'Safra Matopiba' },
+    { id: 'credito', label: 'Crédito vs VBP' },
+    { id: 'clima', label: 'Clima Detalhado' },
+    { id: 'mercado', label: 'Mercado B3' }
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50 p-8 font-sans">
+      <div className="mx-auto max-w-7xl">
+        
+        {/* HEADER BRUTALISTA */}
+        <div className="mb-12 flex flex-col md:flex-row items-start md:items-end justify-between border-b-8 border-black pb-4">
           <div>
-            <h1 className="mb-2 text-3xl font-bold text-gray-800">
-              Inteligência Agrícola: Soja, Câmbio e Clima
+            <h1 className="text-5xl font-black text-black uppercase tracking-tighter leading-none mb-2">
+              Agro<br/>Lakehouse
             </h1>
-            <p className="text-gray-600">
-              Cruzamento de dados de produção (IBGE), economia (IPEA) e riscos ambientais (INPE).
+            <p className="text-xl font-bold uppercase text-gray-600 tracking-tight">
+              Inteligência de Dados • Soja, Câmbio e Clima
             </p>
           </div>
-          
+
           <button
             onClick={handleSync}
             disabled={isSyncing}
-            className={`flex items-center rounded-lg px-6 py-3 font-semibold text-white transition-all shadow-md ${
-              isSyncing ? 'bg-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'
+            className={`mt-6 md:mt-0 flex items-center border-4 border-black px-6 py-3 font-black uppercase transition-all shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${
+              isSyncing ? 'bg-gray-300 text-gray-500 translate-x-[6px] translate-y-[6px] shadow-none' : 'bg-[#ccff00] text-black hover:bg-[#aacc00] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[6px] active:translate-y-[6px] active:shadow-none'
             }`}
           >
-            {isSyncing ? (
-              <>
-                <svg className="mr-2 h-5 w-5 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                Sincronizando Lakehouse...
-              </>
-            ) : (
-              <>
-                <svg className="mr-2 h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                Sincronizar (Webhook)
-              </>
-            )}
+            {isSyncing ? 'Sincronizando...' : 'Sincronizar Dados'}
           </button>
         </div>
 
-        <div className="rounded-xl bg-white p-6 shadow-lg">
-          {/* Controles de Filtro */}
-          <div className="mb-6 flex flex-wrap gap-4">
+        {/* TABS BRUTALISTAS */}
+        <div className="flex flex-wrap gap-2 mb-8">
+          {tabs.map((tab) => (
             <button
-              onClick={() => toggleMetric('producao')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.producao
-                ? 'bg-emerald-500 text-white shadow-md'
-                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                }`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`border-4 border-black px-6 py-2 font-black uppercase text-sm md:text-base transition-all ${
+                activeTab === tab.id 
+                  ? 'bg-black text-white shadow-[4px_4px_0px_0px_rgba(204,255,0,1)] translate-x-[2px] translate-y-[2px]' 
+                  : 'bg-white text-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-100 hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+              }`}
             >
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-300"></span>
-              Produção (Ton)
+              {tab.label}
             </button>
-            <button
-              onClick={() => toggleMetric('fogo')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.fogo
-                ? 'bg-red-500 text-white shadow-md'
-                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                }`}
-            >
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-300"></span>
-              Focos de Calor
-            </button>
-            <button
-              onClick={() => toggleMetric('dolar')}
-              className={`rounded-lg px-4 py-2 font-medium transition-all ${activeMetrics.dolar
-                ? 'bg-blue-500 text-white shadow-md'
-                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                }`}
-            >
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-blue-300"></span>
-              Dólar (R$)
-            </button>
-          </div>
-
-          <div className="h-[500px] w-full" style={{ minHeight: '500px' }}>
-            <ResponsiveContainer width="100%" height="100%" minHeight={500}>
-              <ComposedChart
-                data={data}
-                margin={{ top: 20, right: 40, bottom: 20, left: 60 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="ano" />
-
-                {/* Eixo Y Dinâmico da Esquerda */}
-                <YAxis
-                  yAxisId="left"
-                  domain={['auto', 'auto']}
-                  tickFormatter={(value) => {
-                    if (activeMetrics.producao) return `${(value / 1000000).toFixed(1)}M`;
-                    if (activeMetrics.dolar) return `R$ ${value}`;
-                    return value.toLocaleString('pt-BR');
-                  }}
-                  width={80}
-                />
-
-                {/* Eixo Y da Direita exclusivo para Dólar */}
-                {activeMetrics.producao && activeMetrics.dolar && (
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    domain={['auto', 'auto']}
-                    tickFormatter={(value) => `R$ ${value}`}
-                    width={80}
-                  />
-                )}
-
-                {/* Eixo Invisível para Focos */}
-                <YAxis yAxisId="fire" hide={true} domain={['auto', 'auto']} />
-
-                <Tooltip
-                  formatter={(value: any, name: any) => {
-                    const numValue = Number(value);
-                    if (name === "Produção (Ton)") return [numValue.toLocaleString('pt-BR'), name];
-                    if (name === "Dólar (R$)") return [`R$ ${numValue.toFixed(2)}`, name];
-                    if (name === "Focos de Calor") return [numValue.toLocaleString('pt-BR'), name];
-                    return numValue;
-                  }}
-                />
-
-                {/* Produção da Soja (Barras Verdes) */}
-                {activeMetrics.producao && (
-                  <Bar
-                    yAxisId="left"
-                    dataKey="total_producao_toneladas"
-                    name="Produção (Ton)"
-                    fill="#10b981"
-                    radius={[4, 4, 0, 0]}
-                  />
-                )}
-
-                {/* Focos de Calor (Área Vermelha ao fundo) */}
-                {activeMetrics.fogo && (
-                  <Area
-                    yAxisId={(!activeMetrics.producao && !activeMetrics.dolar) ? "left" : "fire"}
-                    type="monotone"
-                    dataKey="total_focos_calor"
-                    name="Focos de Calor"
-                    fill="#ef4444"
-                    stroke="#ef4444"
-                    fillOpacity={0.2}
-                  />
-                )}
-
-                {/* Cotação do Dólar (Linha Azul) */}
-                {activeMetrics.dolar && (
-                  <Line
-                    yAxisId={activeMetrics.producao ? "right" : "left"}
-                    type="monotone"
-                    dataKey="cotacao_media_dolar"
-                    name="Dólar (R$)"
-                    stroke="#3b82f6"
-                    strokeWidth={3}
-                    dot={{ r: 4 }}
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          ))}
         </div>
-      </div>
 
-      {/* Nova Seção: Visão Regional MATOPIBA */}
-      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Visão Regional: O Fenômeno MATOPIBA</h2>
-        <p className="text-gray-600 mb-4">
-          Evolução do Valor Bruto da Produção (VBP) de soja em grãos na maior fronteira agrícola do país.
-        </p>
+        {/* CONTEÚDO DAS ABAS */}
+        <div className="w-full">
+          {activeTab === 'master' && <ChartMaster />}
+          
+          {activeTab === 'matopiba' && (
+            <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Visão Regional: MATOPIBA</h2>
+              <ChartMatopiba data={dataMatopiba} />
+            </div>
+          )}
+          
+          {activeTab === 'credito' && (
+            <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Crédito Rural vs VBP</h2>
+              <ChartCreditoVBP data={dataCredito} />
+            </div>
+          )}
+          
+          {activeTab === 'clima' && (
+            <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Monitoramento Climático INMET</h2>
+              <ChartClima data={dataClima} />
+            </div>
+          )}
+          
+          {activeTab === 'mercado' && (
+            <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Mercado Futuro vs Safra</h2>
+              <ChartMercado data={dataMercado} />
+            </div>
+          )}
+        </div>
 
-        <ChartMatopiba data={dataMatopiba} />
-      </div>
-
-      {/* Nova Seção: Crédito x Produção */}
-      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Alavancagem: Crédito Rural vs VBP</h2>
-        <p className="text-gray-600 mb-4">
-          Relação histórica entre as concessões de crédito e o Valor Bruto de Produção no MATOPIBA.
-        </p>
-        <ChartCreditoVBP data={dataCredito} />
-      </div>
-
-      {/* Nova Seção: Impactos Climáticos */}
-      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Monitoramento Climático INMET</h2>
-        <p className="text-gray-600 mb-4">
-          Precipitação e temperatura média na região do MATOPIBA.
-        </p>
-        <ChartClima data={dataClima} />
-      </div>
-
-      {/* Nova Seção: Mercado e Expectativas */}
-      <div className="rounded-xl bg-white p-6 shadow-lg mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Mercado Futuro vs Safra</h2>
-        <p className="text-gray-600 mb-4">
-          Estimativa de Safra da CONAB em relação aos contratos futuros de Soja na B3/CBOT.
-        </p>
-        <ChartMercado data={dataMercado} />
       </div>
     </div>
   );

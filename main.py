@@ -141,6 +141,38 @@ def get_indicadores_mercado():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
 
+@lru_cache(maxsize=1)
+def _fetch_master_from_lake():
+    con = get_duckdb_connection()
+    # Left join Mercado (por ano) com Clima (sum/avg por ano)
+    query = """
+        SELECT 
+            m.ano, 
+            AVG(m.media_preco_usd) as preco_soja, 
+            MAX(m.estimativa_safra) as safra_toneladas,
+            SUM(c.precipitacao_mm) as precipitacao_total,
+            AVG(c.temperatura_media) as temperatura_media
+        FROM read_parquet('s3://gold/conab_b3_mercado_*.parquet') m
+        LEFT JOIN read_parquet('s3://gold/inmet_clima_matopiba_*.parquet') c
+        ON m.ano = CAST(EXTRACT(year FROM c.data_medicao) AS INTEGER)
+        GROUP BY m.ano
+        ORDER BY m.ano ASC
+    """
+    try:
+        resultado = con.execute(query).df()
+        resultado = resultado.astype(object).where(resultado.notnull(), None)
+        return {"data": resultado.to_dict(orient="records")}
+    except Exception as e:
+        print(f"Erro no SQL Master: {e}")
+        return {"data": []}
+
+@app.get("/api/v1/indicadores/master")
+def get_indicadores_master():
+    try:
+        return _fetch_master_from_lake()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
+
 def trigger_kestra_flows():
     """Função rodada em background para disparar os fluxos do Kestra"""
     # Kestra roda na porta 8080. Se rodar pelo docker, use o nome do container "kestra"
@@ -182,6 +214,7 @@ def sync_lakehouse(background_tasks: BackgroundTasks):
     _fetch_credito_from_lake.cache_clear()
     _fetch_clima_from_lake.cache_clear()
     _fetch_mercado_from_lake.cache_clear()
+    _fetch_master_from_lake.cache_clear()
     
     return {
         "message": "Sincronização iniciada com sucesso. Os fluxos estão rodando no orquestrador.",
