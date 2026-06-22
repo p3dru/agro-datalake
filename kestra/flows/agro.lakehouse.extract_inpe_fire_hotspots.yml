@@ -1,0 +1,42 @@
+id: extract_inpe_fire_hotspots
+namespace: agro.lakehouse
+
+tasks:
+  - id: fetch_inpe_data
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install requests boto3
+    warningOnStdErr: false
+    script: |
+      import requests
+      import json
+      import os
+      from datetime import datetime
+      from boto3 import session
+      
+      print("Buscando histórico de Focos de Calor...")
+      
+      # Simulando o retorno consolidado anual do portal BDQueimadas do INPE
+      # Em produção, conectaríamos aos endpoints de exportação CSV ou API do INPE
+      fire_data = [
+          {"ano": 2018, "focos_calor": 132872, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2019, "focos_calor": 197396, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2020, "focos_calor": 222797, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2021, "focos_calor": 184208, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2022, "focos_calor": 208821, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2023, "focos_calor": 189953, "bioma_principal": "Cerrado/Amazônia"},
+          {"ano": 2024, "focos_calor": 210000, "bioma_principal": "Cerrado/Amazônia"}
+      ]
+
+      filename = f"inpe_focos_calor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+      with open(filename, 'w', encoding='utf-8') as f:
+          json.dump(fire_data, f, ensure_ascii=False, indent=4)
+      
+      s3_session = session.Session()
+      s3_client = s3_session.client('s3', aws_access_key_id='admin', aws_secret_access_key='password123', endpoint_url='http://172.17.0.1:9000')
+
+      s3_client.upload_file(filename, 'bronze', filename)
+      print(f"Upload de {filename} concluído para a Bronze!")

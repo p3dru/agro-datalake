@@ -1,0 +1,56 @@
+id: build_gold_credito_vbp
+namespace: agro.lakehouse
+
+tasks:
+  - id: duckdb_join_credito_vbp
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install duckdb
+    warningOnStdErr: false
+    script: |
+      import duckdb
+      from datetime import datetime
+
+      con = duckdb.connect(database=':memory:')
+      con.execute("""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='172.17.0.1:9000';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://gold/credito_vbp_consolidado_{timestamp}.parquet"
+
+      # Junta os dados de Crédito (BCB) com a soma do VBP do MATOPIBA (IBGE)
+      query = f"""
+          COPY (
+              WITH vbp_agrupado AS (
+                  SELECT 
+                      ano,
+                      SUM(valor_producao_reais) AS vbp_total_reais
+                  FROM read_parquet('s3://gold/matopiba_consolidado_*.parquet')
+                  GROUP BY ano
+              ),
+              credito AS (
+                  SELECT ano, credito_concedido_milhoes
+                  FROM read_parquet('s3://silver/credito_rural_silver_*.parquet')
+              )
+              SELECT 
+                  c.ano,
+                  c.credito_concedido_milhoes,
+                  (v.vbp_total_reais / 1000000) AS vbp_total_milhoes
+              FROM credito c
+              JOIN vbp_agrupado v ON c.ano = v.ano
+              ORDER BY c.ano ASC
+          ) TO '{output_path}' (FORMAT PARQUET);
+      """
+      
+      con.execute(query)
+      print(f"Camada Gold (Crédito vs VBP) gerada: {output_path}")

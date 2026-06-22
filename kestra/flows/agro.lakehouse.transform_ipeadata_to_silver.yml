@@ -1,0 +1,64 @@
+id: transform_ipeadata_to_silver
+namespace: agro.lakehouse
+
+tasks:
+  - id: process_json_to_parquet
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install boto3 pandas pyarrow
+    warningOnStdErr: false
+    script: |
+      import boto3
+      import pandas as pd
+      import json
+      import os
+      
+      # 1. Conexão com o MinIO
+      s3_client = boto3.client(
+          's3',
+          aws_access_key_id='admin',
+          aws_secret_access_key='password123',
+          endpoint_url='http://172.17.0.1:9000'
+      )
+
+      print("Buscando o arquivo mais recente na camada Bronze...")
+      response = s3_client.list_objects_v2(Bucket='bronze', Prefix='ipeadata_cambio_dolar_')
+      
+      if 'Contents' not in response:
+          print("Nenhum arquivo encontrado na Bronze.")
+          exit(1)
+
+      # Ordena para pegar o arquivo gerado mais recentemente
+      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
+      latest_file = objects[0]['Key']
+      print(f"Arquivo selecionado: {latest_file}")
+
+      # 2. Download do arquivo JSON
+      local_json = 'raw_data.json'
+      s3_client.download_file('bronze', latest_file, local_json)
+
+      # 3. Transformação com Pandas
+      print("Processando dados e convertendo para Parquet...")
+      with open(local_json, 'r', encoding='utf-8') as f:
+          raw_data = json.load(f)
+
+      # O OData4 do IPEA coloca os dados reais dentro da chave "value"
+      df = pd.DataFrame(raw_data.get('value', []))
+
+      # (Opcional) Limpeza básica: Converter a coluna de data para o formato correto
+      if 'VALDATA' in df.columns:
+          df['VALDATA'] = pd.to_datetime(df['VALDATA'])
+
+      # 4. Salvar como Parquet
+      # Trocamos a extensão do arquivo original de .json para .parquet
+      parquet_filename = latest_file.replace('.json', '.parquet')
+      df.to_parquet(parquet_filename, engine='pyarrow', index=False)
+
+      # 5. Upload para a camada Silver
+      print(f"Enviando {parquet_filename} para a camada Silver...")
+      s3_client.upload_file(parquet_filename, 'silver', parquet_filename)
+      
+      print("Transformação concluída com sucesso! Os dados estão prontos para análise.")

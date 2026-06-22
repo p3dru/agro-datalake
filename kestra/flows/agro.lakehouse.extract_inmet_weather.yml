@@ -1,0 +1,61 @@
+id: extract_inmet_weather
+namespace: agro.lakehouse
+description: "Extrai dados climáticos brutos do INMET para a camada Bronze"
+
+tasks:
+  - id: python_extract_bronze
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    warningOnStdErr: false
+    beforeCommands:
+      - pip install pandas duckdb
+    env:
+      MINIO_ENDPOINT: "172.17.0.1:9000"
+      AWS_ACCESS_KEY_ID: "admin"
+      AWS_SECRET_ACCESS_KEY: "password123"
+    script: |
+      import os
+      import duckdb
+      import pandas as pd
+      from datetime import datetime, timedelta
+      import urllib.request
+      import json
+
+      print("Iniciando extração do INMET...")
+      
+      # Dados mockados representativos
+      data_medicao = pd.date_range(end=datetime.today(), periods=30)
+      df = pd.DataFrame({
+          "data_medicao": data_medicao,
+          "precipitacao_mm": [0, 5, 12, 0, 0, 0, 45, 10, 2, 0] * 3,
+          "temperatura_max": [32, 31, 29, 33, 34, 35, 28, 29, 31, 33] * 3,
+          "temperatura_min": [22, 22, 21, 23, 24, 25, 20, 21, 22, 23] * 3,
+          "regiao": ["Matopiba"] * 30
+      })
+      
+      con = duckdb.connect(':memory:')
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      con.execute(f"""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='{endpoint}';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+      
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://bronze/inmet_raw_{timestamp}.parquet"
+      
+      print("Salvando Bronze...")
+      con.execute(f"COPY df TO '{output_path}' (FORMAT PARQUET)")
+      print("Processo finalizado com sucesso.")
+
+  - id: trigger_silver
+    type: io.kestra.plugin.core.flow.Subflow
+    flowId: transform_inmet_to_silver
+    namespace: agro.lakehouse
+    wait: false

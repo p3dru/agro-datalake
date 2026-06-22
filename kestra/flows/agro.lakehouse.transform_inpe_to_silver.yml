@@ -1,0 +1,40 @@
+id: transform_inpe_to_silver
+namespace: agro.lakehouse
+
+tasks:
+  - id: process_inpe_to_parquet
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install boto3 pandas pyarrow
+    warningOnStdErr: false
+    script: |
+      import boto3
+      import pandas as pd
+      import json
+
+      s3_client = boto3.client('s3', aws_access_key_id='admin', aws_secret_access_key='password123', endpoint_url='http://172.17.0.1:9000')
+
+      response = s3_client.list_objects_v2(Bucket='bronze', Prefix='inpe_focos_calor_')
+      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
+      latest_file = objects[0]['Key']
+
+      local_json = 'raw_inpe.json'
+      s3_client.download_file('bronze', latest_file, local_json)
+
+      with open(local_json, 'r', encoding='utf-8') as f:
+          raw_data = json.load(f)
+
+      df = pd.DataFrame(raw_data)
+      
+      # Garantir tipos numéricos
+      df['ano'] = pd.to_numeric(df['ano'])
+      df['focos_calor'] = pd.to_numeric(df['focos_calor'])
+
+      parquet_filename = latest_file.replace('.json', '.parquet')
+      df.to_parquet(parquet_filename, engine='pyarrow', index=False)
+
+      s3_client.upload_file(parquet_filename, 'silver', parquet_filename)
+      print(f"Transformação concluída! {parquet_filename} enviado para a Silver.")

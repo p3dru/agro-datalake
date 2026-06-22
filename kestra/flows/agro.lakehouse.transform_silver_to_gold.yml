@@ -1,0 +1,55 @@
+id: transform_silver_to_gold
+namespace: agro.lakehouse
+
+tasks:
+  - id: duckdb_aggregate_to_gold
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install duckdb
+    warningOnStdErr: false
+    script: |
+      import duckdb
+      from datetime import datetime
+
+      print("Iniciando o motor analítico do DuckDB...")
+      con = duckdb.connect(database=':memory:')
+      
+      # 1. Configurando a conexão direta do DuckDB com o MinIO
+      # Usamos o IP de gateway do Docker para o contêiner enxergar o MinIO
+      con.execute("""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='172.17.0.1:9000';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+
+      # 2. Definindo o nome do arquivo de saída na camada Gold
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://gold/indicadores_anuais_agregados_{timestamp}.parquet"
+
+      print(f"Processando dados da Silver e gravando em: {output_path}")
+
+      # 3. Executando a transformação e salvando diretamente no MinIO
+      # O comando COPY (...) TO 's3://...' faz a leitura, agregação e escrita em uma tacada só
+      query = f"""
+          COPY (
+              SELECT 
+                  EXTRACT(YEAR FROM CAST(VALDATA AS TIMESTAMP)) as ano,
+                  COUNT(*) as total_registros,
+                  ROUND(AVG(CAST(VALVALOR AS DOUBLE)), 2) as media_valor,
+                  MIN(CAST(VALVALOR AS DOUBLE)) as valor_minimo,
+                  MAX(CAST(VALVALOR AS DOUBLE)) as valor_maximo
+              FROM read_parquet('s3://silver/*.parquet')
+              GROUP BY ano
+              ORDER BY ano DESC
+          ) TO '{output_path}' (FORMAT PARQUET);
+      """
+      
+      con.execute(query)
+      print("Processamento concluído! A Camada Gold foi atualizada com sucesso.")

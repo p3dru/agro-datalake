@@ -1,0 +1,63 @@
+id: build_gold_inmet
+namespace: agro.lakehouse
+description: "Lê a camada Silver do INMET e constrói a tabela Gold final para consumo do Dashboard"
+
+tasks:
+  - id: duckdb_aggregate_inmet
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install duckdb boto3
+    warningOnStdErr: false
+    env:
+      MINIO_ENDPOINT: "172.17.0.1:9000"
+      AWS_ACCESS_KEY_ID: "admin"
+      AWS_SECRET_ACCESS_KEY: "password123"
+    script: |
+      import os
+      import duckdb
+      import boto3
+      from datetime import datetime
+
+      s3_client = boto3.client(
+          's3',
+          aws_access_key_id='admin',
+          aws_secret_access_key='password123',
+          endpoint_url='http://172.17.0.1:9000'
+      )
+      
+      print("Buscando INMET na camada Silver...")
+      response = s3_client.list_objects_v2(Bucket='silver', Prefix='inmet_silver_')
+      if 'Contents' not in response:
+          print("Nenhum arquivo INMET Silver encontrado.")
+          exit(1)
+          
+      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
+      latest_file = objects[0]['Key']
+      
+      con = duckdb.connect(database=':memory:')
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      con.execute(f"""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='{endpoint}';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://gold/inmet_clima_matopiba_{timestamp}.parquet"
+
+      print(f"Gerando camada Gold em {output_path}...")
+      query = f"""
+          COPY (
+              SELECT *
+              FROM read_parquet('s3://silver/{latest_file}')
+          ) TO '{output_path}' (FORMAT PARQUET)
+      """
+      con.execute(query)
+      print("Processo INMET finalizado! Base Gold pronta para o dashboard.")

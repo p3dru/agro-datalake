@@ -1,0 +1,120 @@
+id: transform_ibge_to_silver
+namespace: agro.lakehouse
+
+tasks:
+  - id: process_ibge_to_parquet
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install boto3 pandas pyarrow
+    warningOnStdErr: false
+    script: |
+      import boto3
+      import pandas as pd
+      import json
+      import os
+      
+      # 1. Conexão com o MinIO
+      s3_client = boto3.client(
+          's3',
+          aws_access_key_id='admin',
+          aws_secret_access_key='password123',
+          endpoint_url='http://172.17.0.1:9000'
+      )
+
+      print("Buscando o arquivo mais recente da Soja (IBGE) na camada Bronze...")
+      response = s3_client.list_objects_v2(Bucket='bronze', Prefix='ibge_sidra_soja_')
+      
+      if 'Contents' not in response:
+          print("Nenhum arquivo do IBGE encontrado na Bronze.")
+          exit(1)
+
+      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
+      latest_file = objects[0]['Key']
+      print(f"Arquivo selecionado: {latest_file}")
+
+      # 2. Download do arquivo JSON
+      local_json = 'raw_ibge.json'
+      s3_client.download_file('bronze', latest_file, local_json)
+
+      # 3. Transformação Avançada com Pandas
+      with open(local_json, 'r', encoding='utf-8') as f:
+          raw_data = json.load(f)
+
+      df = pd.DataFrame(raw_data)
+
+      # --- A MÁGICA DA DETECÇÃO DINÂMICA ---
+      # Lê a linha zero para mapear as chaves (D1N, D2N, etc) para os seus significados reais
+      header = df.iloc[0]
+      col_ano = None
+      col_estado = None
+      col_variavel = None
+
+      for col in df.columns:
+          val = str(header[col]).lower()
+          if 'ano' == val or 'ano' in val:
+              col_ano = col
+          elif 'federação' in val or 'estado' in val:
+              col_estado = col
+          elif 'variável' in val or 'variavel' in val:
+              col_variavel = col
+              
+      col_valor = 'V' # Esta chave é sempre fixa no SIDRA
+
+      print(f"Mapeamento dinâmico detectado: Ano={col_ano}, Estado={col_estado}, Variavel={col_variavel}")
+
+      if not all([col_ano, col_estado, col_variavel]):
+          print(f"ERRO: Não foi possível identificar as colunas. Cabeçalho recebido: {header.to_dict()}")
+          exit(1)
+
+      # Cortar o header e selecionar as colunas na ordem correta
+      df = df.iloc[1:].copy()
+      df = df[[col_ano, col_estado, col_variavel, col_valor]]
+      df.columns = ['ano', 'estado', 'variavel', 'valor']
+
+      # Convertendo os valores para números (Hifens viram NaN)
+      df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+      df['ano'] = pd.to_numeric(df['ano'], errors='coerce')
+
+      # Pivotando a tabela
+      print("Executando Pivot dos dados...")
+      df_pivot = df.pivot_table(
+          index=['ano', 'estado'], 
+          columns='variavel', 
+          values='valor', 
+          aggfunc='sum'
+      ).reset_index()
+
+      df_pivot.columns.name = None
+
+      # Renomeação inteligente baseada em palavras-chave
+      rename_map = {}
+      for col in df_pivot.columns:
+          col_str = str(col).lower()
+          if 'colhida' in col_str:
+              rename_map[col] = 'area_colhida_hectares'
+          elif 'produzida' in col_str:
+              rename_map[col] = 'producao_toneladas'
+              
+      df_pivot.rename(columns=rename_map, inplace=True)
+      print(f"Colunas após a transformação: {list(df_pivot.columns)}")
+
+      # Validação final de integridade
+      if 'producao_toneladas' not in df_pivot.columns:
+          print("ERRO CRÍTICO: Coluna de produção não encontrada mesmo após mapeamento.")
+          exit(1)
+
+      # Removendo linhas inválidas
+      df_pivot = df_pivot.dropna(subset=['producao_toneladas'])
+
+      # 4. Salvar como Parquet
+      parquet_filename = latest_file.replace('.json', '.parquet')
+      df_pivot.to_parquet(parquet_filename, engine='pyarrow', index=False)
+
+      # 5. Upload para a camada Silver
+      print(f"Enviando {parquet_filename} para a camada Silver...")
+      s3_client.upload_file(parquet_filename, 'silver', parquet_filename)
+      
+      print("Transformação do IBGE concluída com sucesso!")

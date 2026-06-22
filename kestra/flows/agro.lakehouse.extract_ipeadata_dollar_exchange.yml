@@ -1,0 +1,42 @@
+id: extract_ipeadata_dollar_exchange
+namespace: agro.lakehouse
+
+tasks:
+  - id: fetch_api_data
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install requests boto3
+    warningOnStdErr: false
+    script: |
+      import requests
+      import json
+      import os
+      from datetime import datetime
+      from boto3 import session
+      
+      # Série do Dólar Comercial (Venda) - Média do Período
+      url = "http://www.ipeadata.gov.br/api/odata4/ValoresSerie(SERCODIGO='BM12_ERC12')"
+      
+      print(f"Buscando histórico do Dólar em: {url}")
+      response = requests.get(url)
+
+      if response.status_code == 200:
+          data = response.json()
+          print("Dados do Dólar extraídos com sucesso!")
+      else:
+          print("Erro na API.")
+          exit(1)
+
+      # Mudamos o nome do arquivo para refletir o dado real
+      filename = f"ipeadata_cambio_dolar_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+      with open(filename, 'w', encoding='utf-8') as f:
+          json.dump(data, f, ensure_ascii=False, indent=4)
+      
+      s3_session = session.Session()
+      s3_client = s3_session.client('s3', aws_access_key_id='admin', aws_secret_access_key='password123', endpoint_url='http://172.17.0.1:9000')
+
+      s3_client.upload_file(filename, 'bronze', filename)
+      print(f"Upload de {filename} concluído!")

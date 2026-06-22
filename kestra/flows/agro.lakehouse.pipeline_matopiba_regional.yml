@@ -1,0 +1,117 @@
+id: pipeline_matopiba_regional
+namespace: agro.lakehouse
+
+tasks:
+  - id: fetch_and_transform_matopiba
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install requests boto3 pandas pyarrow
+    warningOnStdErr: false
+    script: |
+      import requests
+      import json
+      import boto3
+      import pandas as pd
+      from datetime import datetime
+
+      # 1. Configuração do MinIO
+      s3_client = boto3.client(
+          's3',
+          aws_access_key_id='admin',
+          aws_secret_access_key='password123',
+          endpoint_url='http://172.17.0.1:9000'
+      )
+
+      # 2. Extração (Camada Bronze)
+      url = "https://apisidra.ibge.gov.br/values/t/1612/n3/17,21,22,29/v/109,215/p/all/c81/2713"
+      
+      print(f"Extraindo dados regionais do MATOPIBA: {url}")
+      response = requests.get(url)
+      
+      if response.status_code != 200:
+          print("Erro ao acessar a API do SIDRA.")
+          exit(1)
+
+      raw_data = response.json()
+      
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      bronze_file = f"matopiba_raw_{timestamp}.json"
+      
+      with open(bronze_file, 'w', encoding='utf-8') as f:
+          json.dump(raw_data, f, ensure_ascii=False, indent=4)
+          
+      s3_client.upload_file(bronze_file, 'bronze', bronze_file)
+      print(f"Camada Bronze atualizada: {bronze_file}")
+
+      # 3. Transformação (Camada Silver)
+      print("Iniciando processamento para a Camada Silver...")
+      df = pd.DataFrame(raw_data)
+
+      # [AJUSTE 1] Mapeamento dinâmico que EXCLUI colunas de "Código"
+      header = df.iloc[0]
+      
+      col_ano = next((c for c in df.columns if 'ano' in str(header[c]).lower() and 'código' not in str(header[c]).lower()), None)
+      col_estado = next((c for c in df.columns if ('estado' in str(header[c]).lower() or 'federação' in str(header[c]).lower()) and 'código' not in str(header[c]).lower()), None)
+      col_variavel = next((c for c in df.columns if ('variável' in str(header[c]).lower() or 'variavel' in str(header[c]).lower()) and 'código' not in str(header[c]).lower()), None)
+      col_valor = 'V'
+
+      # Se a exclusão falhar, faremos o fallback explícito para as colunas sabidas
+      if not col_variavel:
+          col_variavel = 'D2N' # D2N é sempre a variável nominal no SIDRA
+      if not col_ano:
+          col_ano = 'D3N'
+      if not col_estado:
+          col_estado = 'D1N'
+
+      df = df.iloc[1:].copy()
+      df = df[[col_ano, col_estado, col_variavel, col_valor]]
+      df.columns = ['ano', 'estado', 'variavel', 'valor']
+
+      # Limpeza de caracteres vazios do IBGE ('...' ou '-')
+      df['valor'] = pd.to_numeric(df['valor'], errors='coerce')
+      df['ano'] = pd.to_numeric(df['ano'], errors='coerce')
+
+      # Pivot para transformar variáveis em colunas independentes
+      print("Executando Pivot dos dados...")
+      df_pivot = df.pivot_table(
+          index=['ano', 'estado'], 
+          columns='variavel', 
+          values='valor', 
+          aggfunc='sum'
+      ).reset_index()
+
+      df_pivot.columns.name = None
+      
+      print(f"Colunas originais detectadas no Pivot: {list(df_pivot.columns)}")
+      
+      # [AJUSTE 2] Renomeação à prova de balas (Aceitando textos sem acento OU os códigos da API)
+      rename_map = {}
+      for col in df_pivot.columns:
+          col_str = str(col).lower()
+          # 109 é a variável absoluta de Área Colhida/Plantada
+          if '109' in col_str or 'plan' in col_str or 'colh' in col_str or 'area' in col_str:
+              rename_map[col] = 'area_colhida_hectares'
+          # 215 é a variável absoluta de Valor da Produção
+          elif '215' in col_str or 'prod' in col_str or 'valor' in col_str:
+              rename_map[col] = 'valor_producao_mil_reais'
+              
+      df_pivot.rename(columns=rename_map, inplace=True)
+      print(f"Colunas mapeadas com sucesso: {list(df_pivot.columns)}")
+
+      # Validação
+      coluna_alvo = 'valor_producao_mil_reais'
+      if coluna_alvo not in df_pivot.columns:
+          print(f"ERRO SEVERO: A coluna mapeada '{coluna_alvo}' não foi encontrada. Colunas atuais: {list(df_pivot.columns)}")
+          exit(1)
+
+      # Remove registros nulos
+      df_pivot = df_pivot.dropna(subset=[coluna_alvo])
+
+      silver_file = f"matopiba_silver_{timestamp}.parquet"
+      df_pivot.to_parquet(silver_file, engine='pyarrow', index=False)
+      
+      s3_client.upload_file(silver_file, 'silver', silver_file)
+      print(f"Camada Silver atualizada com sucesso: {silver_file}")

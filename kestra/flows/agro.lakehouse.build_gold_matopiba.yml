@@ -1,0 +1,47 @@
+id: build_gold_matopiba
+namespace: agro.lakehouse
+
+tasks:
+  - id: duckdb_aggregate_matopiba
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install duckdb
+    warningOnStdErr: false
+    script: |
+      import duckdb
+      from datetime import datetime
+
+      con = duckdb.connect(database=':memory:')
+      con.execute("""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='172.17.0.1:9000';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://gold/matopiba_consolidado_{timestamp}.parquet"
+
+      print("Calculando o crescimento financeiro do MATOPIBA...")
+
+      # Multiplicamos por 1000 porque o IBGE entrega em "Mil Reais"
+      query = f"""
+          COPY (
+              SELECT 
+                  ano,
+                  estado,
+                  area_colhida_hectares,
+                  (valor_producao_mil_reais * 1000) AS valor_producao_reais
+              FROM read_parquet('s3://silver/matopiba_silver_*.parquet')
+              ORDER BY ano DESC, valor_producao_reais DESC
+          ) TO '{output_path}' (FORMAT PARQUET);
+      """
+      
+      con.execute(query)
+      print(f"Camada Gold gerada em: {output_path}")

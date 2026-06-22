@@ -1,0 +1,76 @@
+id: transform_conab_b3_to_silver
+namespace: agro.lakehouse
+description: "Lê a camada Bronze do CONAB/B3, transforma os dados e envia para a camada Silver"
+
+tasks:
+  - id: python_transform_silver
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    warningOnStdErr: false
+    env:
+      MINIO_ENDPOINT: "172.17.0.1:9000"
+      AWS_ACCESS_KEY_ID: "admin"
+      AWS_SECRET_ACCESS_KEY: "password123"
+    beforeCommands:
+      - pip install duckdb boto3
+    script: |
+      import os
+      import duckdb
+      import boto3
+
+      print("Buscando o arquivo mais recente da CONAB/B3 na camada Bronze...")
+      s3_client = boto3.client(
+          's3',
+          aws_access_key_id='admin',
+          aws_secret_access_key='password123',
+          endpoint_url='http://172.17.0.1:9000'
+      )
+      
+      response = s3_client.list_objects_v2(Bucket='bronze', Prefix='conab_b3_raw_')
+      if 'Contents' not in response:
+          print("Nenhum arquivo CONAB/B3 encontrado na Bronze.")
+          exit(1)
+          
+      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
+      latest_file = objects[0]['Key']
+      print(f"Arquivo selecionado: {latest_file}")
+      
+      con = duckdb.connect(':memory:')
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      con.execute(f"""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='{endpoint}';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+      
+      print("Aplicando limpeza e adequação de formatos...")
+      silver_filename = latest_file.replace('conab_b3_raw_', 'conab_b3_silver_')
+      
+      # Filtra nulos e padroniza a data
+      silver_query = f"""
+          COPY (
+              SELECT 
+                  data_pregao,
+                  ano,
+                  mes,
+                  preco_fechamento_usd,
+                  estimativa_safra_toneladas
+              FROM read_parquet('s3://bronze/{latest_file}')
+              WHERE preco_fechamento_usd IS NOT NULL
+          ) TO 's3://silver/{silver_filename}' (FORMAT PARQUET)
+      """
+      
+      con.execute(silver_query)
+      print(f"Camada Silver processada: s3://silver/{silver_filename}")
+
+  - id: trigger_gold
+    type: io.kestra.plugin.core.flow.Subflow
+    flowId: build_gold_conab_b3
+    namespace: agro.lakehouse
+    wait: false

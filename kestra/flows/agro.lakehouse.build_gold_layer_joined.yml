@@ -1,0 +1,73 @@
+id: build_gold_layer_joined
+namespace: agro.lakehouse
+
+tasks:
+  - id: duckdb_join_silver_to_gold
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    beforeCommands:
+      - pip install duckdb
+    warningOnStdErr: false
+    script: |
+      import duckdb
+      from datetime import datetime
+
+      print("Iniciando o motor analítico do DuckDB...")
+      con = duckdb.connect(database=':memory:')
+      
+      # 1. Configurando a conexão direta do DuckDB com o MinIO
+      con.execute("""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='172.17.0.1:9000';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://gold/agro_clima_economia_{timestamp}.parquet"
+
+      print(f"Executando JOIN TRIPLO e gravando em: {output_path}")
+
+      # 2. A Query Analítica
+      
+      query = f"""
+          COPY (
+              WITH ibge_agregado AS (
+                  SELECT ano, 
+                         SUM("Área plantada") AS total_area_hectares, 
+                         SUM(producao_toneladas) AS total_producao_toneladas
+                  FROM read_parquet('s3://silver/ibge_sidra_soja_*.parquet')
+                  GROUP BY ano
+              ),
+              ipea_agregado AS (
+                  SELECT EXTRACT(YEAR FROM CAST(VALDATA AS TIMESTAMP)) AS ano, 
+                         AVG(CAST(VALVALOR AS DOUBLE)) AS cotacao_media_dolar
+                  FROM read_parquet('s3://silver/ipeadata_cambio_dolar_*.parquet')
+                  GROUP BY ano
+              ),
+              inpe_agregado AS (
+                  SELECT ano, 
+                         SUM(focos_calor) AS total_focos_calor
+                  FROM read_parquet('s3://silver/inpe_focos_calor_*.parquet')
+                  GROUP BY ano
+              )
+              
+              SELECT 
+                  ibge.ano,
+                  ibge.total_area_hectares,
+                  ibge.total_producao_toneladas,
+                  ROUND(ipea.cotacao_media_dolar, 2) AS cotacao_media_dolar,
+                  COALESCE(inpe.total_focos_calor, 0) AS total_focos_calor
+              FROM ibge_agregado ibge
+              LEFT JOIN ipea_agregado ipea ON ibge.ano = ipea.ano
+              LEFT JOIN inpe_agregado inpe ON ibge.ano = inpe.ano
+              ORDER BY ibge.ano DESC
+          ) TO '{output_path}' (FORMAT PARQUET);
+      """
+      con.execute(query)
+      print("Sucesso! Camada Gold agora une Agricultura, Economia e Meio Ambiente.")

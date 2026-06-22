@@ -1,0 +1,78 @@
+id: extract_conab_b3
+namespace: agro.lakehouse
+description: "Extrai cotações futuras de Soja (CBOT/B3) e CONAB para a camada Bronze"
+
+tasks:
+  - id: python_extract_bronze
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    warningOnStdErr: false
+    env:
+      MINIO_ENDPOINT: "172.17.0.1:9000"
+      AWS_ACCESS_KEY_ID: "admin"
+      AWS_SECRET_ACCESS_KEY: "password123"
+    beforeCommands:
+      - pip install yfinance duckdb pandas
+    script: |
+      import os
+      import duckdb
+      import pandas as pd
+      import yfinance as yf
+      from datetime import datetime
+
+      print("Iniciando extração do Mercado Financeiro (yfinance)...")
+      
+      soja = yf.Ticker("ZS=F")
+      hist = soja.history(period="1y")
+      
+      df_b3 = hist.reset_index()[['Date', 'Close']].copy()
+      df_b3.rename(columns={"Date": "data_pregao", "Close": "preco_fechamento_usd"}, inplace=True)
+      df_b3['data_pregao'] = df_b3['data_pregao'].dt.tz_localize(None)
+      
+      df_b3['ano'] = df_b3['data_pregao'].dt.year
+      df_b3['mes'] = df_b3['data_pregao'].dt.month
+      
+      # Dados reais aproximados da CONAB (Série Histórica)
+      conab_historico = {
+          2015: 96200000,
+          2016: 95400000,
+          2017: 114300000,
+          2018: 119300000,
+          2019: 115000000,
+          2020: 124800000,
+          2021: 138200000,
+          2022: 125500000,
+          2023: 154600000,
+          2024: 147400000,
+          2025: 168300000
+      }
+      
+      # Mapeia a produção real daquele ano (ou 168M como fallback para o futuro)
+      df_b3['estimativa_safra_toneladas'] = df_b3['ano'].map(conab_historico).fillna(168300000)
+      
+      con = duckdb.connect(':memory:')
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      con.execute(f"""
+          INSTALL httpfs;
+          LOAD httpfs;
+          SET s3_endpoint='{endpoint}';
+          SET s3_access_key_id='admin';
+          SET s3_secret_access_key='password123';
+          SET s3_use_ssl=false;
+          SET s3_url_style='path';
+      """)
+      
+      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+      output_path = f"s3://bronze/conab_b3_raw_{timestamp}.parquet"
+      
+      print("Salvando Bronze...")
+      con.execute(f"COPY df_b3 TO '{output_path}' (FORMAT PARQUET)")
+      print("Processo finalizado com sucesso.")
+
+  - id: trigger_silver
+    type: io.kestra.plugin.core.flow.Subflow
+    flowId: transform_conab_b3_to_silver
+    namespace: agro.lakehouse
+    wait: false
