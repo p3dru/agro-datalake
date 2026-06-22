@@ -99,6 +99,48 @@ def get_indicadores_credito_vbp():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
 
+@lru_cache(maxsize=1)
+def _fetch_clima_from_lake():
+    con = get_duckdb_connection()
+    query = """
+        SELECT * FROM read_parquet('s3://gold/inmet_clima_matopiba_*.parquet') 
+        ORDER BY data_medicao ASC
+    """
+    try:
+        resultado = con.execute(query).df()
+        resultado = resultado.where(resultado.notnull(), None)
+        return {"data": resultado.to_dict(orient="records")}
+    except Exception:
+        return {"data": []}
+
+@app.get("/api/v1/indicadores/clima")
+def get_indicadores_clima():
+    try:
+        return _fetch_clima_from_lake()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
+
+@lru_cache(maxsize=1)
+def _fetch_mercado_from_lake():
+    con = get_duckdb_connection()
+    query = """
+        SELECT * FROM read_parquet('s3://gold/conab_b3_mercado_*.parquet') 
+        ORDER BY ano ASC, mes ASC
+    """
+    try:
+        resultado = con.execute(query).df()
+        resultado = resultado.where(resultado.notnull(), None)
+        return {"data": resultado.to_dict(orient="records")}
+    except Exception:
+        return {"data": []}
+
+@app.get("/api/v1/indicadores/mercado")
+def get_indicadores_mercado():
+    try:
+        return _fetch_mercado_from_lake()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
+
 def trigger_kestra_flows():
     """Função rodada em background para disparar os fluxos do Kestra"""
     # Kestra roda na porta 8080. Se rodar pelo docker, use o nome do container "kestra"
@@ -111,7 +153,9 @@ def trigger_kestra_flows():
         "extract_inpe_fire_hotspots",
         "extract_ipeadata_dollar_exchange",
         "pipeline_credito_rural",
-        "pipeline_matopiba_regional"
+        "pipeline_matopiba_regional",
+        "extract_inmet_weather",
+        "extract_conab_b3"
     ]
     
     for flow in flows_to_trigger:
@@ -136,6 +180,8 @@ def sync_lakehouse(background_tasks: BackgroundTasks):
     _fetch_anuais_from_lake.cache_clear()
     _fetch_matopiba_from_lake.cache_clear()
     _fetch_credito_from_lake.cache_clear()
+    _fetch_clima_from_lake.cache_clear()
+    _fetch_mercado_from_lake.cache_clear()
     
     return {
         "message": "Sincronização iniciada com sucesso. Os fluxos estão rodando no orquestrador.",
