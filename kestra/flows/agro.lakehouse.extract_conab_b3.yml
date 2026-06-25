@@ -14,7 +14,7 @@ tasks:
       AWS_ACCESS_KEY_ID: "admin"
       AWS_SECRET_ACCESS_KEY: "password123"
     beforeCommands:
-      - pip install yfinance duckdb pandas
+      - pip install yfinance duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
     script: |
       import os
       import duckdb
@@ -64,12 +64,72 @@ tasks:
           SET s3_url_style='path';
       """)
       
-      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-      output_path = f"s3://bronze/conab_b3_raw_{timestamp}.parquet"
+      # Garante tipos compatíveis no PyArrow antes de verificar iceberg
+      import pandas as pd
+      from datetime import datetime
       
-      print("Salvando Bronze...")
-      con.execute(f"COPY df_b3 TO '{output_path}' (FORMAT PARQUET)")
-      print("Processo finalizado com sucesso.")
+      # Inicia Integração com Apache Iceberg
+      from pyiceberg.catalog import load_catalog
+      import pyarrow as pa
+      
+      endpoint_url = endpoint if endpoint.startswith('http') else f"http://{endpoint}"
+      
+      print("Conectando ao Catálogo Iceberg (SQL/PostgreSQL)...")
+      catalog = load_catalog(
+          "default",
+          **{
+              "type": "sql",
+              "uri": "postgresql+psycopg2://kestra:password123@postgres:5432/kestra",
+              "s3.endpoint": endpoint_url,
+              "s3.access-key-id": "admin",
+              "s3.secret-access-key": "password123",
+          }
+      )
+      
+      catalog.create_namespace_if_not_exists("agro_bronze")
+      table_id = "agro_bronze.conab_b3_raw"
+      
+      # Garante tipos compatíveis no PyArrow
+      df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+      df_arrow = pa.Table.from_pandas(df_b3)
+      
+      print("Salvando no Apache Iceberg...")
+      try:
+          table = catalog.load_table(table_id)
+          df_existing = table.scan().to_pandas()
+          if not df_existing.empty:
+              max_date = pd.to_datetime(df_existing['data_pregao']).max()
+              print(f"Modo Incremental: Maior data na base é {max_date}")
+              # Trazemos apenas dados mais recentes
+              df_b3 = df_b3[pd.to_datetime(df_b3['data_pregao']) > max_date]
+              if df_b3.empty:
+                  print("Nenhum dado novo para extrair. Finalizando fluxo de forma limpa.")
+                  exit(0)
+              
+              print(f"{len(df_b3)} novos registros encontrados.")
+              df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+              df_arrow = pa.Table.from_pandas(df_b3)
+              
+              # No Iceberg real a gente pode fazer Merge ou Append, aqui faremos append incremental
+              table.append(df_arrow)
+              print("Tabela Iceberg atualizada com sucesso (Append Incremental).")
+          else:
+              raise Exception("Tabela vazia")
+      except Exception as e:
+          print("Tabela não encontrada, criando nova tabela Iceberg...")
+          # Garante tipos
+          df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+          df_arrow = pa.Table.from_pandas(df_b3)
+          
+          table = catalog.create_table(
+              table_id,
+              schema=df_arrow.schema,
+              location="s3://bronze/iceberg/conab_b3_raw"
+          )
+          table.append(df_arrow)
+          print("Tabela Iceberg criada com sucesso (Full Load).")
+      
+      print("Processo de Extrato (Bronze) finalizado com sucesso.")
 
   - id: trigger_silver
     type: io.kestra.plugin.core.flow.Subflow

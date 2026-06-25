@@ -1,15 +1,15 @@
 id: build_gold_conab_b3
 namespace: agro.lakehouse
-description: "Lê a camada Silver do CONAB/B3 e constrói a tabela Gold final para consumo do Dashboard"
+description: "Lê a camada Silver (Iceberg) do CONAB/B3 e constrói a tabela Gold (Iceberg) final para consumo do Dashboard"
 
 tasks:
-  - id: duckdb_aggregate_conab_b3
+  - id: python_aggregate_conab_b3
     type: io.kestra.plugin.scripts.python.Script
     containerImage: python:3.11-slim
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
     beforeCommands:
-      - pip install duckdb boto3
+      - pip install duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
     warningOnStdErr: false
     env:
       MINIO_ENDPOINT: "172.17.0.1:9000"
@@ -18,51 +18,52 @@ tasks:
     script: |
       import os
       import duckdb
-      import boto3
-      from datetime import datetime
+      import pandas as pd
+      from pyiceberg.catalog import load_catalog
+      import pyarrow as pa
 
-      s3_client = boto3.client(
-          's3',
-          aws_access_key_id='admin',
-          aws_secret_access_key='password123',
-          endpoint_url='http://172.17.0.1:9000'
+      print("Conectando ao Catálogo Iceberg (SQL/PostgreSQL)...")
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      endpoint_url = endpoint if endpoint.startswith('http') else f"http://{endpoint}"
+      
+      catalog = load_catalog(
+          "default",
+          **{
+              "type": "sql",
+              "uri": "postgresql+psycopg2://kestra:password123@postgres:5432/kestra",
+              "s3.endpoint": endpoint_url,
+              "s3.access-key-id": "admin",
+              "s3.secret-access-key": "password123",
+          }
       )
       
-      print("Buscando CONAB/B3 na camada Silver...")
-      response = s3_client.list_objects_v2(Bucket='silver', Prefix='conab_b3_silver_')
-      if 'Contents' not in response:
-          print("Nenhum arquivo CONAB/B3 Silver encontrado.")
-          exit(1)
-          
-      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
-      latest_file = objects[0]['Key']
+      print("Lendo a tabela Silver...")
+      silver_table = catalog.load_table("agro_silver.conab_b3_silver")
+      df_silver = silver_table.scan().to_pandas()
       
-      con = duckdb.connect(database=':memory:')
-      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
-      con.execute(f"""
-          INSTALL httpfs;
-          LOAD httpfs;
-          SET s3_endpoint='{endpoint}';
-          SET s3_access_key_id='admin';
-          SET s3_secret_access_key='password123';
-          SET s3_use_ssl=false;
-          SET s3_url_style='path';
-      """)
-
-      timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-      output_path = f"s3://gold/conab_b3_mercado_{timestamp}.parquet"
-
-      print(f"Gerando camada Gold em {output_path}...")
-      query = f"""
-          COPY (
-              SELECT 
-                  ano,
-                  mes,
-                  AVG(preco_fechamento_usd) as media_preco_usd,
-                  MAX(estimativa_safra_toneladas) as estimativa_safra
-              FROM read_parquet('s3://silver/{latest_file}')
-              GROUP BY ano, mes
-          ) TO '{output_path}' (FORMAT PARQUET)
-      """
-      con.execute(query)
+      # Agregação para a camada Gold
+      df_gold = df_silver.groupby(['ano', 'mes']).agg(
+          media_preco_usd=('preco_fechamento_usd', 'mean'),
+          estimativa_safra=('estimativa_safra_toneladas', 'max')
+      ).reset_index()
+      
+      catalog.create_namespace_if_not_exists("agro_gold")
+      table_id_gold = "agro_gold.conab_b3_mercado"
+      df_arrow_gold = pa.Table.from_pandas(df_gold)
+      
+      print("Gerando camada Gold no Iceberg...")
+      try:
+          gold_table = catalog.load_table(table_id_gold)
+          gold_table.overwrite(df_arrow_gold)
+          print("Tabela Iceberg Gold sobrescrita com sucesso.")
+      except Exception as e:
+          print("Tabela não encontrada, criando nova tabela Iceberg Gold...")
+          gold_table = catalog.create_table(
+              table_id_gold,
+              schema=df_arrow_gold.schema,
+              location="s3://gold/iceberg/conab_b3_mercado"
+          )
+          gold_table.append(df_arrow_gold)
+          print("Tabela Iceberg Gold criada com sucesso.")
+      
       print("Processo CONAB/B3 finalizado! Base Gold pronta para o dashboard.")

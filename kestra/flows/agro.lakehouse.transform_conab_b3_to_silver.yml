@@ -1,6 +1,6 @@
 id: transform_conab_b3_to_silver
 namespace: agro.lakehouse
-description: "Lê a camada Bronze do CONAB/B3, transforma os dados e envia para a camada Silver"
+description: "Lê a camada Bronze (Iceberg), transforma os dados e envia para a camada Silver (Iceberg)"
 
 tasks:
   - id: python_transform_silver
@@ -14,60 +14,61 @@ tasks:
       AWS_ACCESS_KEY_ID: "admin"
       AWS_SECRET_ACCESS_KEY: "password123"
     beforeCommands:
-      - pip install duckdb boto3
+      - pip install duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
     script: |
       import os
       import duckdb
-      import boto3
+      import pandas as pd
+      from pyiceberg.catalog import load_catalog
+      import pyarrow as pa
+      import pyarrow.compute as pc
 
-      print("Buscando o arquivo mais recente da CONAB/B3 na camada Bronze...")
-      s3_client = boto3.client(
-          's3',
-          aws_access_key_id='admin',
-          aws_secret_access_key='password123',
-          endpoint_url='http://172.17.0.1:9000'
+      print("Conectando ao Catálogo Iceberg (SQL/PostgreSQL)...")
+      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
+      endpoint_url = endpoint if endpoint.startswith('http') else f"http://{endpoint}"
+      
+      catalog = load_catalog(
+          "default",
+          **{
+              "type": "sql",
+              "uri": "postgresql+psycopg2://kestra:password123@postgres:5432/kestra",
+              "s3.endpoint": endpoint_url,
+              "s3.access-key-id": "admin",
+              "s3.secret-access-key": "password123",
+          }
       )
       
-      response = s3_client.list_objects_v2(Bucket='bronze', Prefix='conab_b3_raw_')
-      if 'Contents' not in response:
-          print("Nenhum arquivo CONAB/B3 encontrado na Bronze.")
-          exit(1)
-          
-      objects = sorted(response['Contents'], key=lambda obj: obj['LastModified'], reverse=True)
-      latest_file = objects[0]['Key']
-      print(f"Arquivo selecionado: {latest_file}")
+      print("Lendo a tabela Bronze...")
+      bronze_table = catalog.load_table("agro_bronze.conab_b3_raw")
       
-      con = duckdb.connect(':memory:')
-      endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
-      con.execute(f"""
-          INSTALL httpfs;
-          LOAD httpfs;
-          SET s3_endpoint='{endpoint}';
-          SET s3_access_key_id='admin';
-          SET s3_secret_access_key='password123';
-          SET s3_use_ssl=false;
-          SET s3_url_style='path';
-      """)
+      # Filtra nulls via PyArrow Compute ou Pandas
+      # Lemos para pandas para facilitar transformações se necessário
+      df_bronze = bronze_table.scan().to_pandas()
+      df_silver = df_bronze[df_bronze['preco_fechamento_usd'].notnull()]
       
-      print("Aplicando limpeza e adequação de formatos...")
-      silver_filename = latest_file.replace('conab_b3_raw_', 'conab_b3_silver_')
+      # Garante tipos corretos
+      df_silver['data_pregao'] = pd.to_datetime(df_silver['data_pregao'])
       
-      # Filtra nulos e padroniza a data
-      silver_query = f"""
-          COPY (
-              SELECT 
-                  data_pregao,
-                  ano,
-                  mes,
-                  preco_fechamento_usd,
-                  estimativa_safra_toneladas
-              FROM read_parquet('s3://bronze/{latest_file}')
-              WHERE preco_fechamento_usd IS NOT NULL
-          ) TO 's3://silver/{silver_filename}' (FORMAT PARQUET)
-      """
+      catalog.create_namespace_if_not_exists("agro_silver")
+      table_id_silver = "agro_silver.conab_b3_silver"
+      df_arrow_silver = pa.Table.from_pandas(df_silver)
       
-      con.execute(silver_query)
-      print(f"Camada Silver processada: s3://silver/{silver_filename}")
+      print("Salvando no Apache Iceberg (Camada Silver)...")
+      try:
+          silver_table = catalog.load_table(table_id_silver)
+          silver_table.overwrite(df_arrow_silver)
+          print("Tabela Iceberg Silver sobrescrita com sucesso.")
+      except Exception as e:
+          print("Tabela não encontrada, criando nova tabela Iceberg Silver...")
+          silver_table = catalog.create_table(
+              table_id_silver,
+              schema=df_arrow_silver.schema,
+              location="s3://silver/iceberg/conab_b3_silver"
+          )
+          silver_table.append(df_arrow_silver)
+          print("Tabela Iceberg Silver criada com sucesso.")
+      
+      print("Processo de Transformação (Silver) finalizado com sucesso.")
 
   - id: trigger_gold
     type: io.kestra.plugin.core.flow.Subflow
