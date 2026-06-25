@@ -4,4 +4,4 @@ __pycache__/
 .env
 .idea/
 .vscode/
-ia-kit/*
+ia-kit/*ia-kit/
