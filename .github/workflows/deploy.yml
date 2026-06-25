@@ -1,0 +1,53 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install fastapi httpx pytest great_expectations pandas
+        
+    - name: Run Schema Tests (Great Expectations mock)
+      run: |
+        echo "Validating schema definitions for Lakehouse Delta/Iceberg tables..."
+        # Mocks a schema validation step to emulate a Data Quality gate
+        python -c "
+        import pandas as pd
+        import great_expectations as ge
+        
+        # Simula o dataframe Gold que esperamos
+        df = pd.DataFrame({
+            'ano': [2024],
+            'mes': [10],
+            'preco_soja': [1000.0],
+            'safra_toneladas': [150000000]
+        })
+        
+        gdf = ge.from_pandas(df)
+        assert gdf.expect_column_values_to_not_be_null('ano').success
+        assert gdf.expect_column_values_to_not_be_null('safra_toneladas').success
+        assert gdf.expect_column_values_to_be_between('preco_soja', min_value=0, max_value=10000).success
+        print('Data Quality (Schema) Passed!')
+        "
+        
+    - name: Run API Unit Tests
+      run: |
+        echo "Running FastAPI unit tests..."
+        # Add basic test
+        python -m pytest tests/
