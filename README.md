@@ -670,6 +670,6 @@ Este projeto é de código aberto e disponibilizado para fins educacionais e de 
 
 <div align="center">
 
-**Feito com ☕ e dados reais do agronegócio brasileiro**
+**Feito com curiosidade e dados reais do agronegócio brasileiro**
 
 </div>
