@@ -10,7 +10,7 @@ tasks:
       type: io.kestra.plugin.core.runner.Process
     warningOnStdErr: false
     beforeCommands:
-      - pip install pandas duckdb
+      - pip install requests pandas duckdb pyiceberg[s3fs,sql-postgres,pyarrow] psycopg2-binary
     env:
       MINIO_ENDPOINT: "172.17.0.1:9000"
       AWS_ACCESS_KEY_ID: "admin"
@@ -20,20 +20,55 @@ tasks:
       import duckdb
       import pandas as pd
       from datetime import datetime, timedelta
-      import urllib.request
-      import json
+      import requests
 
-      print("Iniciando extração do INMET...")
+      print("Iniciando extração do Clima (Open-Meteo) para as 4 capitais do MATOPIBA...")
       
-      # Dados mockados representativos
-      data_medicao = pd.date_range(end=datetime.today(), periods=30)
-      df = pd.DataFrame({
-          "data_medicao": data_medicao,
-          "precipitacao_mm": [0, 5, 12, 0, 0, 0, 45, 10, 2, 0] * 3,
-          "temperatura_max": [32, 31, 29, 33, 34, 35, 28, 29, 31, 33] * 3,
-          "temperatura_min": [22, 22, 21, 23, 24, 25, 20, 21, 22, 23] * 3,
-          "regiao": ["Matopiba"] * 30
-      })
+      # Coordenadas das principais fronteiras (BA, MA, PI, TO)
+      cidades = [
+          {"nome": "Barreiras (BA)", "lat": -12.15, "lon": -44.99},
+          {"nome": "Balsas (MA)", "lat": -7.53, "lon": -46.03},
+          {"nome": "Uruçuí (PI)", "lat": -7.22, "lon": -44.55},
+          {"nome": "Mateiros (TO)", "lat": -10.54, "lon": -46.42}
+      ]
+      
+      end_date = datetime.today().strftime('%Y-%m-%d')
+      start_date = (datetime.today() - timedelta(days=10*365)).strftime('%Y-%m-%d')
+      
+      dfs = []
+      
+      for cidade in cidades:
+          lat, lon = cidade["lat"], cidade["lon"]
+          print(f"Baixando dados de {cidade['nome']}...")
+          url = f"https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}&start_date={start_date}&end_date={end_date}&daily=precipitation_sum,temperature_2m_max,temperature_2m_min&timezone=America/Sao_Paulo"
+          
+          response = requests.get(url)
+          if response.status_code != 200:
+              print(f"Erro na API Open-Meteo para {cidade['nome']}: {response.text}")
+              continue
+              
+          data = response.json()
+          
+          df_cidade = pd.DataFrame({
+              "data_medicao": pd.to_datetime(data["daily"]["time"]),
+              "precipitacao_mm": data["daily"]["precipitation_sum"],
+              "temperatura_max": data["daily"]["temperature_2m_max"],
+              "temperatura_min": data["daily"]["temperature_2m_min"]
+          })
+          dfs.append(df_cidade)
+          
+      if not dfs:
+          print("Nenhum dado foi baixado com sucesso.")
+          exit(1)
+          
+      print("Agregando médias climáticas regionais...")
+      # Concatena e tira a média agrupando por data (isso gera a média da região do MATOPIBA inteira por dia)
+      df_all = pd.concat(dfs)
+      df = df_all.groupby('data_medicao').mean().reset_index()
+      df['regiao'] = 'Matopiba'
+      
+      # Remove nulos
+      df = df.dropna()
       
       con = duckdb.connect(':memory:')
       endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')

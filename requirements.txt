@@ -6,3 +6,5 @@ requests
 yfinance
 PyJWT
 python-multipart
+pyiceberg[s3fs,sql-postgres,pyarrow]
+psycopg2-binary

@@ -9,7 +9,7 @@ tasks:
     taskRunner:
       type: io.kestra.plugin.core.runner.Process
     beforeCommands:
-      - pip install duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
+      - pip install duckdb pandas pyiceberg[s3fs,sql-postgres,pyarrow] psycopg2-binary
     warningOnStdErr: false
     env:
       MINIO_ENDPOINT: "172.17.0.1:9000"

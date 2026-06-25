@@ -14,7 +14,7 @@ tasks:
       AWS_ACCESS_KEY_ID: "admin"
       AWS_SECRET_ACCESS_KEY: "password123"
     beforeCommands:
-      - pip install yfinance duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
+      - pip install yfinance duckdb pandas pyiceberg[s3fs,sql-postgres,pyarrow] psycopg2-binary requests
     script: |
       import os
       import duckdb
@@ -34,24 +34,27 @@ tasks:
       df_b3['ano'] = df_b3['data_pregao'].dt.year
       df_b3['mes'] = df_b3['data_pregao'].dt.month
       
-      # Dados reais aproximados da CONAB (Série Histórica)
-      conab_historico = {
-          2015: 96200000,
-          2016: 95400000,
-          2017: 114300000,
-          2018: 119300000,
-          2019: 115000000,
-          2020: 124800000,
-          2021: 138200000,
-          2022: 125500000,
-          2023: 154600000,
-          2024: 147400000,
-          2025: 168300000
-      }
-      
-      # Mapeia a produção real daquele ano (ou 168M como fallback para o futuro)
-      df_b3['estimativa_safra_toneladas'] = df_b3['ano'].map(conab_historico).fillna(168300000)
-      
+      import requests
+
+      print("Extraindo dados reais de Safra Nacional (IBGE SIDRA)...")
+      url_ibge = "https://apisidra.ibge.gov.br/values/t/1612/n1/1/v/214/p/all/c81/2713"
+      resp = requests.get(url_ibge)
+      if resp.status_code == 200:
+          dados_ibge = resp.json()[1:] # Ignora cabeçalho
+          df_ibge = pd.DataFrame(dados_ibge)
+          df_ibge['ano_ibge'] = pd.to_numeric(df_ibge['D3N'], errors='coerce')
+          df_ibge['safra_val'] = pd.to_numeric(df_ibge['V'], errors='coerce')
+          df_ibge = df_ibge.dropna(subset=['ano_ibge', 'safra_val'])
+          
+          safra_historico = dict(zip(df_ibge['ano_ibge'], df_ibge['safra_val']))
+          if not safra_historico:
+              safra_historico = {2024: 144473768}
+      else:
+          print("Falha ao consultar IBGE, usando fallback fixo.")
+          safra_historico = {2024: 144473768}
+          
+      last_val = list(safra_historico.values())[-1]
+      df_b3['estimativa_safra_toneladas'] = df_b3['ano'].map(safra_historico).fillna(last_val)      
       con = duckdb.connect(':memory:')
       endpoint = os.environ.get('MINIO_ENDPOINT', '172.17.0.1:9000')
       con.execute(f"""
@@ -90,7 +93,7 @@ tasks:
       table_id = "agro_bronze.conab_b3_raw"
       
       # Garante tipos compatíveis no PyArrow
-      df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+      df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao']).astype('datetime64[us]')
       df_arrow = pa.Table.from_pandas(df_b3)
       
       print("Salvando no Apache Iceberg...")
@@ -107,7 +110,7 @@ tasks:
                   exit(0)
               
               print(f"{len(df_b3)} novos registros encontrados.")
-              df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+              df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao']).astype('datetime64[us]')
               df_arrow = pa.Table.from_pandas(df_b3)
               
               # No Iceberg real a gente pode fazer Merge ou Append, aqui faremos append incremental
@@ -118,7 +121,7 @@ tasks:
       except Exception as e:
           print("Tabela não encontrada, criando nova tabela Iceberg...")
           # Garante tipos
-          df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao'])
+          df_b3['data_pregao'] = pd.to_datetime(df_b3['data_pregao']).astype('datetime64[us]')
           df_arrow = pa.Table.from_pandas(df_b3)
           
           table = catalog.create_table(

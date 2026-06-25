@@ -14,7 +14,7 @@ tasks:
       AWS_ACCESS_KEY_ID: "admin"
       AWS_SECRET_ACCESS_KEY: "password123"
     beforeCommands:
-      - pip install duckdb pandas pyiceberg[s3fs,sql,pyarrow] psycopg2-binary
+      - pip install duckdb pandas pyiceberg[s3fs,sql-postgres,pyarrow] psycopg2-binary
     script: |
       import os
       import duckdb
@@ -47,7 +47,7 @@ tasks:
       df_silver = df_bronze[df_bronze['preco_fechamento_usd'].notnull()]
       
       # Garante tipos corretos
-      df_silver['data_pregao'] = pd.to_datetime(df_silver['data_pregao'])
+      df_silver['data_pregao'] = pd.to_datetime(df_silver['data_pregao']).astype('datetime64[us]')
       
       catalog.create_namespace_if_not_exists("agro_silver")
       table_id_silver = "agro_silver.conab_b3_silver"
