@@ -4,3 +4,5 @@ duckdb
 pandas
 requests
 yfinance
+PyJWT
+python-multipart

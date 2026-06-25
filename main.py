@@ -1,9 +1,13 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 import requests
 from fastapi.middleware.cors import CORSMiddleware
 import duckdb
 import os
 from functools import lru_cache
+from pydantic import BaseModel
+from utils.auth import verify_token, create_access_token
+from pyiceberg.catalog import load_catalog
+import pyarrow as pa
 
 # Inicializa a aplicação FastAPI
 app = FastAPI(
@@ -25,7 +29,7 @@ def get_duckdb_connection():
     configurar o acesso direto ao MinIO (nosso S3 local).
     """
     con = duckdb.connect(database=':memory:')
-    endpoint = os.getenv('MINIO_ENDPOINT', 'localhost:9000')
+    endpoint = os.getenv('MINIO_ENDPOINT', '172.17.0.1:9000')
     con.execute(f"""
         INSTALL httpfs;
         LOAD httpfs;
@@ -37,9 +41,35 @@ def get_duckdb_connection():
     """)
     return con
 
+def get_iceberg_catalog():
+    endpoint = os.getenv('MINIO_ENDPOINT', '172.17.0.1:9000')
+    endpoint_url = endpoint if endpoint.startswith('http') else f"http://{endpoint}"
+    return load_catalog(
+        "default",
+        **{
+            "type": "sql",
+            "uri": "postgresql+psycopg2://kestra:password123@postgres:5432/kestra",
+            "s3.endpoint": endpoint_url,
+            "s3.access-key-id": "admin",
+            "s3.secret-access-key": "password123",
+        }
+    )
+
 @app.get("/")
 def read_root():
-    return {"status": "A API do Lakehouse está online!"}
+    return {"status": "A API do Lakehouse está online e conectada ao Iceberg!"}
+
+class LoginModel(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/v1/auth/login")
+def login(user: LoginModel):
+    # Credenciais hardcoded para o portfólio
+    if user.username == "admin" and user.password == "agro123":
+        token = create_access_token({"sub": user.username})
+        return {"access_token": token, "token_type": "bearer"}
+    raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
 @lru_cache(maxsize=1)
 def _fetch_anuais_from_lake():
@@ -53,7 +83,7 @@ def _fetch_anuais_from_lake():
     dados_json = resultado.to_dict(orient="records")
     return {"data": dados_json, "total_linhas": len(dados_json)}
 
-@app.get("/api/v1/indicadores/anuais")
+@app.get("/api/v1/indicadores/anuais", dependencies=[Depends(verify_token)])
 def get_indicadores_anuais():
     """
     Consome a camada GOLD do Data Lakehouse: Soja vs Dólar.
@@ -74,7 +104,7 @@ def _fetch_matopiba_from_lake():
     resultado = resultado.where(resultado.notnull(), None)
     return {"data": resultado.to_dict(orient="records")}
 
-@app.get("/api/v1/indicadores/matopiba")
+@app.get("/api/v1/indicadores/matopiba", dependencies=[Depends(verify_token)])
 def get_indicadores_matopiba():
     try:
         return _fetch_matopiba_from_lake()
@@ -92,7 +122,7 @@ def _fetch_credito_from_lake():
     resultado = resultado.where(resultado.notnull(), None)
     return {"data": resultado.to_dict(orient="records")}
 
-@app.get("/api/v1/indicadores/credito-vbp")
+@app.get("/api/v1/indicadores/credito-vbp", dependencies=[Depends(verify_token)])
 def get_indicadores_credito_vbp():
     try:
         return _fetch_credito_from_lake()
@@ -113,7 +143,7 @@ def _fetch_clima_from_lake():
     except Exception:
         return {"data": []}
 
-@app.get("/api/v1/indicadores/clima")
+@app.get("/api/v1/indicadores/clima", dependencies=[Depends(verify_token)])
 def get_indicadores_clima():
     try:
         return _fetch_clima_from_lake()
@@ -122,19 +152,26 @@ def get_indicadores_clima():
 
 @lru_cache(maxsize=1)
 def _fetch_mercado_from_lake():
-    con = get_duckdb_connection()
-    query = """
-        SELECT * FROM read_parquet('s3://gold/conab_b3_mercado_*.parquet') 
-        ORDER BY ano ASC, mes ASC
-    """
     try:
+        catalog = get_iceberg_catalog()
+        table = catalog.load_table("agro_gold.conab_b3_mercado")
+        df_arrow = table.scan().to_arrow()
+        
+        con = get_duckdb_connection()
+        con.register('mercado_iceberg', df_arrow)
+        
+        query = """
+            SELECT * FROM mercado_iceberg
+            ORDER BY ano ASC, mes ASC
+        """
         resultado = con.execute(query).df()
         resultado = resultado.where(resultado.notnull(), None)
         return {"data": resultado.to_dict(orient="records")}
-    except Exception:
+    except Exception as e:
+        print(f"Erro Mercado Iceberg: {e}")
         return {"data": []}
 
-@app.get("/api/v1/indicadores/mercado")
+@app.get("/api/v1/indicadores/mercado", dependencies=[Depends(verify_token)])
 def get_indicadores_mercado():
     try:
         return _fetch_mercado_from_lake()
@@ -143,35 +180,72 @@ def get_indicadores_mercado():
 
 @lru_cache(maxsize=1)
 def _fetch_master_from_lake():
-    con = get_duckdb_connection()
-    # Left join Mercado (por ano) com Clima (sum/avg por ano)
-    query = """
-        SELECT 
-            m.ano, 
-            AVG(m.media_preco_usd) as preco_soja, 
-            MAX(m.estimativa_safra) as safra_toneladas,
-            SUM(c.precipitacao_mm) as precipitacao_total,
-            AVG(c.temperatura_media) as temperatura_media
-        FROM read_parquet('s3://gold/conab_b3_mercado_*.parquet') m
-        LEFT JOIN read_parquet('s3://gold/inmet_clima_matopiba_*.parquet') c
-        ON m.ano = CAST(EXTRACT(year FROM c.data_medicao) AS INTEGER)
-        GROUP BY m.ano
-        ORDER BY m.ano ASC
-    """
     try:
+        catalog = get_iceberg_catalog()
+        table = catalog.load_table("agro_gold.conab_b3_mercado")
+        df_arrow = table.scan().to_arrow()
+        
+        con = get_duckdb_connection()
+        con.register('mercado_iceberg', df_arrow)
+        
+        # Left join Mercado (Iceberg) com Clima (Parquet)
+        query = """
+            SELECT 
+                m.ano, 
+                AVG(m.media_preco_usd) as preco_soja, 
+                MAX(m.estimativa_safra) as safra_toneladas,
+                SUM(c.precipitacao_mm) as precipitacao_total,
+                AVG(c.temperatura_media) as temperatura_media
+            FROM mercado_iceberg m
+            LEFT JOIN read_parquet('s3://gold/inmet_clima_matopiba_*.parquet') c
+            ON m.ano = CAST(EXTRACT(year FROM c.data_medicao) AS INTEGER)
+            GROUP BY m.ano
+            ORDER BY m.ano ASC
+        """
         resultado = con.execute(query).df()
         resultado = resultado.astype(object).where(resultado.notnull(), None)
         return {"data": resultado.to_dict(orient="records")}
     except Exception as e:
-        print(f"Erro no SQL Master: {e}")
+        print(f"Erro no SQL Master (Iceberg): {e}")
         return {"data": []}
 
-@app.get("/api/v1/indicadores/master")
+@app.get("/api/v1/indicadores/master", dependencies=[Depends(verify_token)])
 def get_indicadores_master():
     try:
         return _fetch_master_from_lake()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro analítico: {str(e)}")
+
+@app.get("/api/v1/indicadores/insights", dependencies=[Depends(verify_token)])
+def get_dynamic_insights():
+    try:
+        dados = _fetch_master_from_lake()["data"]
+        if not dados or len(dados) < 2:
+            return {"insight": "Dados insuficientes para análise."}
+        
+        # Pega os últimos 2 anos com dados completos de safra e preço
+        dados_validos = [d for d in dados if d["preco_soja"] and d["safra_toneladas"]]
+        if len(dados_validos) < 2:
+            return {"insight": "Aguardando consolidação histórica."}
+            
+        ano_atual = dados_validos[-1]
+        ano_anterior = dados_validos[-2]
+        
+        diff_safra = ((ano_atual["safra_toneladas"] - ano_anterior["safra_toneladas"]) / ano_anterior["safra_toneladas"]) * 100
+        diff_preco = ((ano_atual["preco_soja"] - ano_anterior["preco_soja"]) / ano_anterior["preco_soja"]) * 100
+        
+        if diff_safra < 0 and diff_preco > 0:
+            texto = f"A QUEDA DE {abs(diff_safra):.1f}% NA SAFRA EM {ano_atual['ano']} IMPULSIONOU OS PREÇOS FUTUROS EM {diff_preco:.1f}%."
+        elif diff_safra > 0 and diff_preco < 0:
+            texto = f"O RECORDE DE SAFRA (+{diff_safra:.1f}%) EM {ano_atual['ano']} ESTÁ PRESSIONANDO OS PREÇOS DA SOJA (-{abs(diff_preco):.1f}%)."
+        elif diff_safra > 0 and diff_preco > 0:
+            texto = f"CENÁRIO ATÍPICO: SAFRA E PREÇOS CRESCERAM SIMULTANEAMENTE EM {ano_atual['ano']}."
+        else:
+            texto = f"RETRAÇÃO GLOBAL EM {ano_atual['ano']}: SAFRA E PREÇOS EM QUEDA."
+            
+        return {"insight": texto}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def trigger_kestra_flows():
     """Função rodada em background para disparar os fluxos do Kestra"""
@@ -200,7 +274,7 @@ def trigger_kestra_flows():
         except Exception as e:
             print(f"Erro de conexão com Kestra para {flow}: {e}")
 
-@app.post("/api/v1/sync")
+@app.post("/api/v1/sync", dependencies=[Depends(verify_token)])
 def sync_lakehouse(background_tasks: BackgroundTasks):
     """
     Endpoint de webhook para reprocessar todo o Data Lakehouse.
