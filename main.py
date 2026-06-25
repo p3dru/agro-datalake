@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from utils.auth import verify_token, create_access_token
 from pyiceberg.catalog import load_catalog
 import pyarrow as pa
+import pandas as pd
 
 # Inicializa a aplicação FastAPI
 app = FastAPI(
@@ -220,30 +221,32 @@ def get_indicadores_master():
 def get_dynamic_insights():
     try:
         dados = _fetch_master_from_lake()["data"]
-        if not dados or len(dados) < 2:
-            return {"insight": "Dados insuficientes para análise."}
+        if not dados or len(dados) < 3:
+            return {"insight": "Dados insuficientes para análise de correlação histórica."}
         
-        # Pega os últimos 2 anos com dados completos de safra e preço
-        dados_validos = [d for d in dados if d["preco_soja"] and d["safra_toneladas"]]
-        if len(dados_validos) < 2:
-            return {"insight": "Aguardando consolidação histórica."}
+        # Pega apenas dados completos de safra, preço e precipitação
+        dados_validos = [d for d in dados if d["preco_soja"] and d["safra_toneladas"] and d["precipitacao_total"] is not None]
+        if len(dados_validos) < 3:
+            return {"insight": "Aguardando consolidação histórica com dados climáticos do MATOPIBA para gerar estatísticas."}
             
-        ano_atual = dados_validos[-1]
-        ano_anterior = dados_validos[-2]
+        df = pd.DataFrame(dados_validos)
+        corr = df.corr()
         
-        diff_safra = ((ano_atual["safra_toneladas"] - ano_anterior["safra_toneladas"]) / ano_anterior["safra_toneladas"]) * 100
-        diff_preco = ((ano_atual["preco_soja"] - ano_anterior["preco_soja"]) / ano_anterior["preco_soja"]) * 100
+        corr_clima_safra = corr.loc['precipitacao_total', 'safra_toneladas']
+        corr_safra_preco = corr.loc['safra_toneladas', 'preco_soja']
         
-        if diff_safra < 0 and diff_preco > 0:
-            texto = f"A QUEDA DE {abs(diff_safra):.1f}% NA SAFRA EM {ano_atual['ano']} IMPULSIONOU OS PREÇOS FUTUROS EM {diff_preco:.1f}%."
-        elif diff_safra > 0 and diff_preco < 0:
-            texto = f"O RECORDE DE SAFRA (+{diff_safra:.1f}%) EM {ano_atual['ano']} ESTÁ PRESSIONANDO OS PREÇOS DA SOJA (-{abs(diff_preco):.1f}%)."
-        elif diff_safra > 0 and diff_preco > 0:
-            texto = f"CENÁRIO ATÍPICO: SAFRA E PREÇOS CRESCERAM SIMULTANEAMENTE EM {ano_atual['ano']}."
-        else:
-            texto = f"RETRAÇÃO GLOBAL EM {ano_atual['ano']}: SAFRA E PREÇOS EM QUEDA."
+        texto_clima = "forte " if abs(corr_clima_safra) > 0.6 else "moderada " if abs(corr_clima_safra) > 0.3 else "fraca "
+        texto_clima += "positiva" if corr_clima_safra > 0 else "negativa"
+        
+        texto_preco = "forte " if abs(corr_safra_preco) > 0.6 else "moderada " if abs(corr_safra_preco) > 0.3 else "fraca "
+        texto_preco += "positiva" if corr_safra_preco > 0 else "negativa"
+        
+        texto_final = (f"A SÉRIE HISTÓRICA MOSTRA UMA CORRELAÇÃO ESTATÍSTICA {texto_clima.upper()} ({(corr_clima_safra*100):.1f}%) "
+                       f"ENTRE AS CHUVAS NO MATOPIBA E A SAFRA NACIONAL. "
+                       f"A RELAÇÃO ENTRE A OFERTA DE SAFRA E O PREÇO GLOBAL EM CHICAGO É {texto_preco.upper()} ({(corr_safra_preco*100):.1f}%), "
+                       "VALIDANDO A MECÂNICA DE CAUSA E EFEITO DO AGRONEGÓCIO.")
             
-        return {"insight": texto}
+        return {"insight": texto_final}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
