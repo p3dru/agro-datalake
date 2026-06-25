@@ -6,6 +6,7 @@ import ChartMatopiba from './components/ChartMatopiba';
 import ChartCreditoVBP from './components/ChartCreditoVBP';
 import ChartClima from './components/ChartClima';
 import ChartMercado from './components/ChartMercado';
+import TooltipBox from './components/TooltipBox';
 
 export default function Dashboard() {
   const [token, setToken] = useState<string | null>(null);
@@ -94,7 +95,7 @@ export default function Dashboard() {
               type="text" 
               value={username} 
               onChange={e => setUsername(e.target.value)}
-              className="w-full border-4 border-black p-3 font-mono focus:outline-none focus:bg-[#ccff00]"
+              className="w-full border-4 border-black p-3 font-mono text-black font-bold focus:outline-none focus:bg-[#ccff00]"
             />
           </div>
           <div className="mb-8">
@@ -103,7 +104,7 @@ export default function Dashboard() {
               type="password" 
               value={password} 
               onChange={e => setPassword(e.target.value)}
-              className="w-full border-4 border-black p-3 font-mono focus:outline-none focus:bg-[#ccff00]"
+              className="w-full border-4 border-black p-3 font-mono text-black font-bold focus:outline-none focus:bg-[#ccff00]"
             />
           </div>
           <button type="submit" className="w-full bg-[#ccff00] text-black border-4 border-black font-black uppercase py-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all">
@@ -179,28 +180,40 @@ export default function Dashboard() {
           
           {activeTab === 'matopiba' && (
             <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
-              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Visão Regional: MATOPIBA</h2>
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">
+                Visão Regional: MATOPIBA
+                <TooltipBox text="Compara a produção consolidada de soja (toneladas) no MATOPIBA vs Produção Nacional ao longo dos anos. Dados reais via IBGE (SIDRA)." />
+              </h2>
               <ChartMatopiba data={dataMatopiba} />
             </div>
           )}
           
           {activeTab === 'credito' && (
             <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
-              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Crédito Rural vs VBP</h2>
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">
+                Crédito Rural vs VBP
+                <TooltipBox text="Crédito Rural representa os financiamentos concedidos ao agronegócio nacional, enquanto o VBP (Valor Bruto de Produção) reflete o faturamento total das lavouras no país." />
+              </h2>
               <ChartCreditoVBP data={dataCredito} />
             </div>
           )}
           
           {activeTab === 'clima' && (
             <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
-              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Monitoramento Climático INMET</h2>
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">
+                Monitoramento Climático MATOPIBA
+                <TooltipBox text="Média diária de precipitação (mm) e temperatura agregada das 4 principais cidades do MATOPIBA (Barreiras, Balsas, Uruçuí, Mateiros). O milímetro (mm) mede o volume de chuva: 1mm = 1 litro de água por metro quadrado." />
+              </h2>
               <ChartClima data={dataClima} />
             </div>
           )}
           
           {activeTab === 'mercado' && (
             <div className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] p-6">
-              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">Mercado Futuro vs Safra</h2>
+              <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black border-b-4 border-black pb-2">
+                Mercado Futuro vs Safra
+                <TooltipBox text="Contratos futuros na B3/Chicago (preço global em US$) vs Expectativa de Safra. Mostra a dinâmica de mercado: geralmente, grandes safras reduzem preços e quebras de safra os elevam." />
+              </h2>
               <ChartMercado data={dataMercado} />
             </div>
           )}

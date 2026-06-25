@@ -21,9 +21,12 @@ interface CreditoVBPRow {
 
 export default function ChartCreditoVBP({ data }: { data: CreditoVBPRow[] }) {
     const formatMillions = (value: number) => `R$ ${(value / 1000).toFixed(1)}B`;
-
     return (
-        <div className="h-[400px] w-full mt-4">
+        <div className="flex flex-col w-full h-full">
+            <p className="text-sm font-medium mb-2 text-gray-700 bg-gray-100 p-2 border-l-4 border-black">
+                <strong>Escopo Nacional:</strong> Compara o volume total de Crédito Rural concedido a empresas no Brasil (via BCB) contra o Valor Bruto da Produção retornado.
+            </p>
+            <div className="h-[360px] w-full mt-2">
             <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={data} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -71,6 +74,7 @@ export default function ChartCreditoVBP({ data }: { data: CreditoVBPRow[] }) {
                     />
                 </ComposedChart>
             </ResponsiveContainer>
+            </div>
         </div>
     );
 }

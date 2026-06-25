@@ -50,7 +50,10 @@ export default function ChartMaster({ token }: { token: string }) {
     <div className="flex flex-col lg:flex-row gap-0 border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mb-12">
       {/* 70% Chart Area */}
       <div className="w-full lg:w-[70%] p-6 border-b-4 lg:border-b-0 lg:border-r-4 border-black">
-        <h2 className="text-2xl font-black uppercase mb-6 tracking-tighter text-black">Mecânica: Causa e Efeito</h2>
+        <h2 className="text-2xl font-black uppercase mb-2 tracking-tighter text-black">Mecânica: Causa e Efeito</h2>
+        <p className="text-sm font-medium mb-6 text-gray-700 bg-gray-100 p-2 border-l-4 border-black">
+          <strong>O que este gráfico mostra:</strong> Como o <strong>Clima Regional</strong> (volume de chuva no MATOPIBA) afeta a <strong>Safra Nacional</strong> (produção total do Brasil), que por sua vez impacta o <strong>Preço Global</strong> (cotação do bushel de soja em Chicago/B3).
+        </p>
         <div className="h-[450px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>

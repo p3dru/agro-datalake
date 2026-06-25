@@ -42,7 +42,11 @@ export default function ChartClima({ data }: { data: ClimaRow[] }) {
   }, [data]);
 
   return (
-    <div className="h-[400px] w-full mt-4">
+    <div className="flex flex-col w-full h-full">
+      <p className="text-sm font-medium mb-2 text-gray-700 bg-gray-100 p-2 border-l-4 border-black">
+        <strong>Escopo Local:</strong> Histórico real de Precipitação (chuva em mm) na região polo do MATOPIBA (Barreiras-BA), atualizado diariamente via API do Open-Meteo.
+      </p>
+      <div className="h-[360px] w-full mt-2">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -91,6 +95,7 @@ export default function ChartClima({ data }: { data: ClimaRow[] }) {
           />
         </ComposedChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

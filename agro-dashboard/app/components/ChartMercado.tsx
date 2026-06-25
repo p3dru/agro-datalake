@@ -32,7 +32,11 @@ export default function ChartMercado({ data }: { data: MercadoRow[] }) {
   }, [data]);
 
   return (
-    <div className="h-[400px] w-full mt-4">
+    <div className="flex flex-col w-full h-full">
+      <p className="text-sm font-medium mb-2 text-gray-700 bg-gray-100 p-2 border-l-4 border-black">
+        <strong>Escopo Nacional e Global:</strong> Relaciona a Produção Nacional de Soja real (IBGE) com a variação Global do preço futuro do bushel de soja (Bolsa de Chicago - CBOT).
+      </p>
+      <div className="h-[360px] w-full mt-2">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -59,7 +63,7 @@ export default function ChartMercado({ data }: { data: MercadoRow[] }) {
           <Tooltip 
             formatter={(value: any, name: any) => {
               if (name === "Preço Médio Soja") return [`US$ ${value}`, name];
-              if (name === "Estimativa de Safra (CONAB)") return [`${value} Milhões de Toneladas`, name];
+              if (name === "Estimativa de Safra (IBGE)") return [`${value} Milhões de Toneladas`, name];
               return [value, name];
             }}
           />
@@ -68,7 +72,7 @@ export default function ChartMercado({ data }: { data: MercadoRow[] }) {
           <Bar 
             yAxisId="right" 
             dataKey="estimativa_safra_m" 
-            name="Estimativa de Safra (CONAB)" 
+            name="Estimativa de Safra (IBGE)" 
             fill="#10b981" 
             radius={[4, 4, 0, 0]}
             barSize={40}
@@ -84,6 +88,7 @@ export default function ChartMercado({ data }: { data: MercadoRow[] }) {
           />
         </ComposedChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

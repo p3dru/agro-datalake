@@ -47,7 +47,11 @@ export default function ChartMatopiba({ data }: { data: MatopibaRow[] }) {
   };
 
   return (
-    <div className="h-[400px] w-full mt-4">
+    <div className="flex flex-col w-full h-full">
+      <p className="text-sm font-medium mb-2 text-gray-700 bg-gray-100 p-2 border-l-4 border-black">
+        <strong>Escopo Regional:</strong> Mostra a evolução do Valor da Produção (R$) apenas nos estados da fronteira agrícola (Maranhão, Tocantins, Piauí e Bahia), extraído da API do IBGE.
+      </p>
+      <div className="h-[360px] w-full mt-2">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -75,6 +79,7 @@ export default function ChartMatopiba({ data }: { data: MatopibaRow[] }) {
           <Line type="monotone" dataKey="Tocantins" stroke="#10b981" strokeWidth={3} dot={false} />
         </LineChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }
