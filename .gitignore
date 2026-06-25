@@ -5,3 +5,5 @@ __pycache__/
 .idea/
 .vscode/
 ia-kit/*ia-kit/
+LESSONS_LEARNED.md
+TECHNICAL_GUIDE.md
